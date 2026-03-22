@@ -14,7 +14,6 @@ from event_log import EventLog, Side, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessProver,
     CorrectnessVerifier,
-    ReexecutionStrategy,
 )
 from protocols.transparency.utilization import (
     CovertCapacityEstimator,
@@ -47,7 +46,7 @@ def build_runtime() -> tuple[Runtime, CorrectnessProver, UtilizationProver]:
         correctness_prover,
         utilization_prover,
         CorrectnessVerifier(
-            strategy=ReexecutionStrategy(rerun=_toy_rerun),
+            rerun=_toy_rerun,
             sample_fraction=1.0,
         ),
         ScheduleCoverageVerifier(),
@@ -118,7 +117,7 @@ def run_example() -> Runtime:
     # More sanitization
     utilization_prover.report_sanitization("gpu-node-0", epoch=2, merkle_root="root-2")
 
-    # Second tick: correctness artifact exchange completes, compliance + disclosure
+    # Second tick: correctness evidence exchange completes, compliance + disclosure
     runtime.tick(delta=1.0)
 
     return runtime

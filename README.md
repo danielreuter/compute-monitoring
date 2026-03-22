@@ -22,6 +22,8 @@ This workspace now models CCM as an **append-only event log** plus a set of
 - `event_log.py`: `Event`, `EventLog`, `Role`, `EventView`
 - `ccm.py`: rack config types, protocol orchestration, summary rendering
 - `protocols/`: protocol-local event types plus protocol logic
+- `protocols/transparency/correctness/`: shared correctness events plus
+  `reexecution.py` and `zero_knowledge.py`
 - `tests/`: stdlib `unittest` coverage for the refactor
 
 ## Default Protocol Flow
@@ -29,7 +31,7 @@ This workspace now models CCM as an **append-only event log** plus a set of
 `run_monitoring_cycle(...)` runs protocols in this order:
 
 1. network consistency
-2. reexecution
+2. correctness mechanism (reexecution or zero knowledge)
 3. sanitization frequency
 4. schedule coverage
 5. model approval
@@ -48,6 +50,21 @@ explicit:
 - no `Transcript` storage class
 - no `CheckResult` or `TransparencyReport`
 - all durable verification outputs represented as events
+
+## Correctness Structure
+
+Correctness now has one shared event surface and multiple mechanism-specific
+control flows:
+
+- shared transcript claim: `InferenceClaimedEvent`
+- shared verifier outputs: `CorrectnessCheckRequestedEvent`,
+  `CorrectnessCheckTimedOutEvent`, `CorrectnessEvaluatedEvent`
+- reexecution mechanism: `reexecution.py`
+- zero-knowledge mechanism: `zero_knowledge.py`
+
+This keeps downstream components like compliance and disclosure agnostic to how
+correctness was established, while letting each workload-specific mechanism own
+its own evidence format and addressing details.
 
 ## Reference
 

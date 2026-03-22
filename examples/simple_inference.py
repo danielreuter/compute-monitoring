@@ -16,6 +16,10 @@ from protocols.transparency.correctness import (
     CorrectnessVerifier,
     ReexecutionStrategy,
 )
+from protocols.transparency.memory_filling import (
+    MemoryFillingProver,
+    MemoryFillingVerifier,
+)
 from protocols.transparency.utilization import (
     CovertCapacityEstimator,
     MachineAddedEvent,
@@ -38,14 +42,16 @@ def _toy_rerun(bundle):
     return bundle.output_digest
 
 
-def build_runtime() -> tuple[Runtime, CorrectnessProver, UtilizationProver]:
+def build_runtime() -> tuple[Runtime, CorrectnessProver, UtilizationProver, MemoryFillingProver]:
     """Build the full monitoring runtime."""
     correctness_prover = CorrectnessProver()
     utilization_prover = UtilizationProver()
+    memory_filling_prover = MemoryFillingProver()
 
     participants = [
         correctness_prover,
         utilization_prover,
+        memory_filling_prover,
         CorrectnessVerifier(
             strategy=ReexecutionStrategy(rerun=_toy_rerun),
             sample_fraction=1.0,
@@ -57,6 +63,13 @@ def build_runtime() -> tuple[Runtime, CorrectnessProver, UtilizationProver]:
             sram_per_gpu_bytes=8,
             num_gpus=1,
             excess_capacity_bytes=16,
+        ),
+        MemoryFillingVerifier(
+            fill_size_bytes=64,
+            audit_count=2,
+            audit_interval_ticks=1.0,
+            audit_chunk_length=8,
+            seed=42,
         ),
         RemoteAttestationVerifier(
             trusted_code_digests=frozenset({"code-digest-1"}),
@@ -71,12 +84,12 @@ def build_runtime() -> tuple[Runtime, CorrectnessProver, UtilizationProver]:
         participants=participants,  # type: ignore[arg-type]
         now=0.0,
     )
-    return runtime, correctness_prover, utilization_prover
+    return runtime, correctness_prover, utilization_prover, memory_filling_prover
 
 
 def run_example() -> Runtime:
     """Run the simple inference example and return the runtime."""
-    runtime, correctness_prover, utilization_prover = build_runtime()
+    runtime, correctness_prover, utilization_prover, _memory_filling_prover = build_runtime()
 
     # --- The "real world" pushes activity into the provers ---
 
@@ -120,6 +133,10 @@ def run_example() -> Runtime:
 
     # Second tick: correctness artifact exchange completes, compliance + disclosure
     runtime.tick(delta=1.0)
+
+    # Ticks 3-5: memory filling audits complete (fill on tick 1, audits on 2-3, stop on 4)
+    for _ in range(3):
+        runtime.tick(delta=1.0)
 
     return runtime
 

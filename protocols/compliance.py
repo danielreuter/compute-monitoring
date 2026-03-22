@@ -18,6 +18,7 @@ from protocols.transparency.correctness import (
     InferenceClaimedEvent,
 )
 from protocols.transparency.remote_attestation import RemoteAttestationEvaluatedEvent
+from protocols.transparency.memory_filling import MemoryAuditEvaluatedEvent
 from protocols.transparency.utilization import (
     NetworkUtilizationEvaluatedEvent,
     SanitizationFrequencyEvaluatedEvent,
@@ -80,6 +81,11 @@ class ComplianceVerifier:
         attestation_events = runtime.log.of_type(RemoteAttestationEvaluatedEvent)
         if attestation_events and not attestation_events[-1].passed:
             failures.append(f"remote attestation failed: {attestation_events[-1].details}")
+
+        memory_audit_events = runtime.log.of_type(MemoryAuditEvaluatedEvent)
+        for mae in memory_audit_events:
+            if not mae.passed:
+                failures.append(f"memory filling audit failed: {mae.details}")
 
         # Need at least some transparency data
         has_transparency = bool(

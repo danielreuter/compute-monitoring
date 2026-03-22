@@ -11,6 +11,7 @@ from typing import TypeVar
 from event_log import Event, EventLog
 from runtime import Participant, Runtime  # noqa: F401 — re-export
 from protocols.transparency.correctness import CorrectnessEvaluatedEvent
+from protocols.transparency.memory_filling import MemoryFillStoppedEvent
 from protocols.transparency.utilization import (
     CovertCapacityEstimatedEvent,
     NetworkUtilizationEvaluatedEvent,
@@ -43,6 +44,7 @@ def render_summary(log: EventLog) -> str:
         _latest_of_type(log, ScheduleCoverageEvaluatedEvent),
         _latest_of_type(log, SanitizationFrequencyEvaluatedEvent),
         _latest_of_type(log, NetworkUtilizationEvaluatedEvent),
+        _latest_of_type(log, MemoryFillStoppedEvent),
     ]
     for event in verification_events:
         if event is None:

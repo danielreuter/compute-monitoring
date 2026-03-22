@@ -5,12 +5,12 @@ from dataclasses import dataclass
 
 from event_log import Event, EventLog, Side, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
-    CorrectnessArtifactRef,
+    CorrectnessCommitmentRef,
     CorrectnessCheckRequestedEvent,
     CorrectnessCheckTimedOutEvent,
     CorrectnessVerifier,
     InferenceClaimedEvent,
-    ReexecutionStrategy,
+    WorkloadAddress,
 )
 from runtime.engine import Runtime
 
@@ -18,6 +18,7 @@ from runtime.engine import Runtime
 @dataclass
 class NoOpParticipant:
     """A prover that never responds to correctness checks."""
+
     writer: Side = Side.PROVER
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
@@ -29,9 +30,8 @@ class NoOpParticipant:
 
 class CorrectnessTimeoutTest(unittest.TestCase):
     def test_timeout_after_ticks(self) -> None:
-        strategy = ReexecutionStrategy(rerun=lambda b: "")
         verifier = CorrectnessVerifier(
-            strategy=strategy, sample_fraction=1.0, timeout_ticks=3.0,
+            rerun=lambda b: "", sample_fraction=1.0, timeout_ticks=3.0,
         )
         runtime = Runtime(
             log=EventLog(),
@@ -45,7 +45,11 @@ class CorrectnessTimeoutTest(unittest.TestCase):
                 writer=Side.PROVER, readers=TRANSCRIPT_READERS,
                 request_id="req-1", model_id="model-a",
                 input_digest="in", output_digest="out",
-                artifact_ref=CorrectnessArtifactRef(artifact_id="a1"),
+                commitment_ref=CorrectnessCommitmentRef(commitment_id="a1"),
+                subject=WorkloadAddress(
+                    workload_kind="inference_request",
+                    address="req-1",
+                ),
             )
         )
         runtime.dispatch_until_quiescent()

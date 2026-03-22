@@ -5,14 +5,12 @@ import unittest
 from event_log import EventLog, Side, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessArtifactPublishedEvent,
-    CorrectnessArtifactRef,
     CorrectnessCheckRequestedEvent,
     CorrectnessEvaluatedEvent,
     CorrectnessProver,
     CorrectnessVerifier,
     InferenceClaimedEvent,
     ReexecutionBundle,
-    ReexecutionStrategy,
 )
 from runtime.engine import Runtime
 
@@ -33,8 +31,7 @@ class CorrectnessReexecutionFlowTest(unittest.TestCase):
         )
         prover._bundles[ref.artifact_id] = known_bundle
 
-        strategy = ReexecutionStrategy(rerun=lambda b: rerun_digest)
-        verifier = CorrectnessVerifier(strategy=strategy, sample_fraction=1.0)
+        verifier = CorrectnessVerifier(rerun=lambda b: rerun_digest, sample_fraction=1.0)
 
         runtime = Runtime(
             log=EventLog(),

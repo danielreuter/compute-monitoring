@@ -4,8 +4,9 @@ import unittest
 
 from event_log import EventLog, Side, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
-    CorrectnessArtifactRef,
+    CorrectnessCommitmentRef,
     InferenceClaimedEvent,
+    WorkloadAddress,
 )
 from protocols.transparency.utilization import ScheduleCoverageVerifier
 from protocols.compliance import ComplianceEvaluatedEvent, ComplianceVerifier
@@ -30,7 +31,11 @@ class ComplianceDisclosureFlowTest(unittest.TestCase):
                 writer=Side.PROVER, readers=TRANSCRIPT_READERS,
                 request_id="req-1", model_id="model-a",
                 input_digest="in", output_digest="out",
-                artifact_ref=CorrectnessArtifactRef(artifact_id="a1"),
+                commitment_ref=CorrectnessCommitmentRef(commitment_id="a1"),
+                subject=WorkloadAddress(
+                    workload_kind="inference_request",
+                    address="req-1",
+                ),
             )
         )
         runtime.dispatch_until_quiescent()
@@ -63,7 +68,11 @@ class ComplianceDisclosureFlowTest(unittest.TestCase):
                 writer=Side.PROVER, readers=TRANSCRIPT_READERS,
                 request_id="req-1", model_id="model-b",
                 input_digest="in", output_digest="out",
-                artifact_ref=CorrectnessArtifactRef(artifact_id="a1"),
+                commitment_ref=CorrectnessCommitmentRef(commitment_id="a1"),
+                subject=WorkloadAddress(
+                    workload_kind="inference_request",
+                    address="req-1",
+                ),
             )
         )
         runtime.dispatch_until_quiescent()

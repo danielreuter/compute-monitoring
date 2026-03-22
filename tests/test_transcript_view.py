@@ -4,12 +4,13 @@ import unittest
 
 from event_log import EventLog, EventView, Side, TRANSCRIPT_READERS, VERIFICATION_READERS, DISCLOSURE_READERS
 from protocols.transparency.correctness import (
-    CorrectnessArtifactRef,
+    CorrectnessCommitmentRef,
     CorrectnessCheckRequestedEvent,
     CorrectnessArtifactPublishedEvent,
     CorrectnessEvaluatedEvent,
     InferenceClaimedEvent,
     ReexecutionBundle,
+    WorkloadAddress,
 )
 from protocols.transparency.utilization import (
     MachineAddedEvent,
@@ -26,7 +27,8 @@ class TranscriptViewTest(unittest.TestCase):
                 event_id="claim-1", timestamp=1.0, writer=Side.PROVER, readers=TRANSCRIPT_READERS,
                 request_id="req-1", model_id="model-a",
                 input_digest="in", output_digest="out",
-                artifact_ref=CorrectnessArtifactRef(artifact_id="a1"),
+                commitment_ref=CorrectnessCommitmentRef(commitment_id="a1"),
+                subject=WorkloadAddress(workload_kind="inference_request", address="req-1"),
             ),
             MachineAddedEvent(
                 event_id="machine-1", timestamp=0.0, writer=Side.PROVER, readers=TRANSCRIPT_READERS,
@@ -43,23 +45,25 @@ class TranscriptViewTest(unittest.TestCase):
         self.assertEqual(types, {InferenceClaimedEvent, MachineAddedEvent, NetworkObservationEvent})
 
     def test_transcript_excludes_verification_and_disclosure(self) -> None:
-        ref = CorrectnessArtifactRef(artifact_id="a1")
+        ref = CorrectnessCommitmentRef(commitment_id="a1")
         bundle = ReexecutionBundle(model_id="m", input_bytes=b"", output_digest="d", engine_digest="", metadata={})
         log = EventLog(events=[
             CorrectnessCheckRequestedEvent(
                 event_id="check-1", timestamp=1.0, writer=Side.VERIFIER, readers=VERIFICATION_READERS,
                 session_id="s1", request_id="req-1",
-                artifact_ref=ref, strategy="reexecution",
+                mechanism="reexecution", challenge_token="sample:s1",
+                commitment_ref=ref,
+                subject=WorkloadAddress(workload_kind="inference_request", address="req-1"),
             ),
             CorrectnessArtifactPublishedEvent(
                 event_id="pub-1", timestamp=2.0, writer=Side.PROVER, readers=VERIFICATION_READERS,
                 session_id="s1", in_reply_to="check-1",
-                artifact_ref=ref, bundle=bundle,
+                commitment_ref=ref, bundle=bundle,
             ),
             CorrectnessEvaluatedEvent(
                 event_id="eval-1", timestamp=3.0, writer=Side.VERIFIER, readers=VERIFICATION_READERS,
                 session_id="s1", request_id="req-1",
-                strategy="reexecution", passed=True, details="match",
+                mechanism="reexecution", passed=True, details="match",
             ),
             ComplianceEvaluatedEvent(
                 event_id="comp-1", timestamp=4.0, writer=Side.VERIFIER, readers=VERIFICATION_READERS,

@@ -1,0 +1,7 @@
+[project]
+name = "ccm"
+version = "0.1.0"
+description = "Confidential Compute Monitoring — abstract interfaces and control flow"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []

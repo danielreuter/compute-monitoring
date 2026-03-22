@@ -7,9 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from event_log import Event, Principal, TRANSCRIPT_READERS, VERIFICATION_READERS
-
-from runtime.base import Participant as RuntimeParticipant
+from event_log import Event, Role, TRANSCRIPT_READERS, VERIFICATION_READERS
 from runtime.engine import Runtime
 
 
@@ -64,7 +62,7 @@ from protocols.transparency.utilization import (
 
 @dataclass
 class ProverRuntime:
-    principal: Principal = field(default=Principal.PROVER, init=False)
+    writer: Role = field(default=Role.PROVER, init=False)
     scheduler: ProverSchedulerAdapter
     inference: ProverInferenceAdapter
     control: ProverControlAdapter
@@ -90,8 +88,7 @@ class ProverRuntime:
             CorrectnessArtifactPublishedEvent(
                 event_id=runtime.make_event_id("artifact-published"),
                 timestamp=runtime.now,
-                principal=Principal.PROVER,
-                source="prover_runtime",
+                writer=Role.PROVER,
                 readers=VERIFICATION_READERS,
                 session_id=event.session_id,
                 in_reply_to=event.event_id,
@@ -114,8 +111,7 @@ class ProverRuntime:
             EngineStopAcknowledgedEvent(
                 event_id=runtime.make_event_id("engine-stop-ack"),
                 timestamp=runtime.now,
-                principal=Principal.PROVER,
-                source="prover_runtime",
+                writer=Role.PROVER,
                 readers=VERIFICATION_READERS,
                 session_id=event.session_id,
                 succeeded=succeeded,
@@ -144,8 +140,7 @@ class ProverRuntime:
         claim = InferenceClaimedEvent(
             event_id=runtime.make_event_id("inference-claimed"),
             timestamp=runtime.now,
-            principal=Principal.PROVER,
-            source="prover_runtime",
+            writer=Role.PROVER,
             readers=TRANSCRIPT_READERS,
             request_id=request_id,
             model_id=model_id,

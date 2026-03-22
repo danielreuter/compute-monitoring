@@ -12,8 +12,8 @@ This workspace now models CCM as an **append-only event log** plus a set of
   compute.
 - **Protocols**: components that read the current log, keep whatever ephemeral
   state they need locally, and emit downstream-relevant events.
-- **Readers**: each event instance declares who can read it via
-  `readers: frozenset[Role]`.
+- **Writers/readers**: each event instance declares who wrote it via
+  `writer: Role` and who can read it via `readers: frozenset[Role]`.
 - **Views**: each event type declares `.views`, which determines whether it
   belongs to the transcript, verification, or disclosure views.
 

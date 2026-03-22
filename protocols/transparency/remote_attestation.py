@@ -10,8 +10,7 @@ from typing import ClassVar
 from event_log import (
     Event,
     EventView,
-    Principal,
-    TRANSCRIPT_READERS,
+    Role,
     VERIFICATION_READERS,
 )
 from runtime.base import Participant
@@ -43,7 +42,7 @@ class RemoteAttestationEvaluatedEvent(Event):
 
 @dataclass
 class RemoteAttestationVerifier:
-    principal: Principal = field(default=Principal.VERIFIER, init=False)
+    writer: Role = field(default=Role.VERIFIER, init=False)
     trusted_code_digests: frozenset[str] = frozenset()
     trusted_config_digests: frozenset[str] = frozenset()
 
@@ -81,8 +80,7 @@ class RemoteAttestationVerifier:
             RemoteAttestationEvaluatedEvent(
                 event_id=runtime.make_event_id("attestation-evaluated"),
                 timestamp=runtime.now,
-                principal=Principal.VERIFIER,
-                source="remote_attestation_verifier",
+                writer=Role.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=passed,
                 details=details,

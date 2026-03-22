@@ -11,7 +11,7 @@ from typing import Callable, ClassVar, Protocol
 from event_log import (
     Event,
     EventView,
-    Principal,
+    Role,
     TRANSCRIPT_READERS,
     VERIFICATION_READERS,
 )
@@ -120,7 +120,7 @@ class ReexecutionStrategy:
 
 @dataclass
 class CorrectnessVerifier:
-    principal: Principal = field(default=Principal.VERIFIER, init=False)
+    writer: Role = field(default=Role.VERIFIER, init=False)
     strategy: CorrectnessStrategy
     sample_fraction: float = 0.1
     timeout_ticks: float = 5.0
@@ -155,8 +155,7 @@ class CorrectnessVerifier:
                     CorrectnessCheckRequestedEvent(
                         event_id=runtime.make_event_id("correctness-check"),
                         timestamp=runtime.now,
-                        principal=Principal.VERIFIER,
-                        source="correctness_verifier",
+                        writer=Role.VERIFIER,
                         readers=VERIFICATION_READERS,
                         session_id=session_id,
                         request_id=claim.request_id,
@@ -174,8 +173,7 @@ class CorrectnessVerifier:
                     CorrectnessCheckTimedOutEvent(
                         event_id=runtime.make_event_id("correctness-timeout"),
                         timestamp=runtime.now,
-                        principal=Principal.VERIFIER,
-                        source="correctness_verifier",
+                        writer=Role.VERIFIER,
                         readers=VERIFICATION_READERS,
                         session_id=session_id,
                         request_id=request_id,
@@ -203,8 +201,7 @@ class CorrectnessVerifier:
             CorrectnessEvaluatedEvent(
                 event_id=runtime.make_event_id("correctness-evaluated"),
                 timestamp=runtime.now,
-                principal=Principal.VERIFIER,
-                source="correctness_verifier",
+                writer=Role.VERIFIER,
                 readers=VERIFICATION_READERS,
                 session_id=session_id,
                 request_id=request_id,

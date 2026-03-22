@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 
-from event_log import Event, EventLog, Principal, TRANSCRIPT_READERS
+from event_log import Event, EventLog, Role, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessArtifactRef,
     CorrectnessVerifier,
@@ -142,8 +142,7 @@ def run_example() -> Runtime:
         MachineAddedEvent(
             event_id=runtime.make_event_id("machine-added"),
             timestamp=runtime.now,
-            principal=Principal.PROVER,
-            source="prover_runtime",
+            writer=Role.PROVER,
             readers=TRANSCRIPT_READERS,
             machine_id="gpu-node-0",
             machine_kind="gpu",
@@ -155,8 +154,7 @@ def run_example() -> Runtime:
         WorkloadStartedEvent(
             event_id=runtime.make_event_id("workload-started"),
             timestamp=runtime.now,
-            principal=Principal.PROVER,
-            source="prover_runtime",
+            writer=Role.PROVER,
             readers=TRANSCRIPT_READERS,
             workload_id="w1",
             machine_id="gpu-node-0",
@@ -168,8 +166,7 @@ def run_example() -> Runtime:
         RemoteAttestationClaimedEvent(
             event_id=runtime.make_event_id("attestation"),
             timestamp=runtime.now,
-            principal=Principal.PROVER,
-            source="prover_runtime",
+            writer=Role.PROVER,
             readers=TRANSCRIPT_READERS,
             attester_id="tee-0",
             code_digest="code-digest-1",
@@ -182,8 +179,7 @@ def run_example() -> Runtime:
         MemorySanitizationPerformedEvent(
             event_id=runtime.make_event_id("sanitization"),
             timestamp=runtime.now,
-            principal=Principal.PROVER,
-            source="prover_runtime",
+            writer=Role.PROVER,
             readers=TRANSCRIPT_READERS,
             machine_id="gpu-node-0",
             epoch=1,
@@ -196,8 +192,7 @@ def run_example() -> Runtime:
         MemorySanitizationPerformedEvent(
             event_id=runtime.make_event_id("sanitization"),
             timestamp=runtime.now,
-            principal=Principal.PROVER,
-            source="prover_runtime",
+            writer=Role.PROVER,
             readers=TRANSCRIPT_READERS,
             machine_id="gpu-node-0",
             epoch=2,

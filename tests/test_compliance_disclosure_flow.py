@@ -2,16 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from event_log import EventLog, Principal, TRANSCRIPT_READERS, VERIFICATION_READERS
+from event_log import EventLog, Role, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessArtifactRef,
-    CorrectnessEvaluatedEvent,
     InferenceClaimedEvent,
 )
-from protocols.transparency.utilization import (
-    ScheduleCoverageEvaluatedEvent,
-    ScheduleCoverageVerifier,
-)
+from protocols.transparency.utilization import ScheduleCoverageVerifier
 from protocols.compliance import ComplianceEvaluatedEvent, ComplianceVerifier
 from protocols.disclosure import DisclosurePublishedEvent, DisclosurePublisher
 from runtime.engine import Runtime
@@ -31,8 +27,7 @@ class ComplianceDisclosureFlowTest(unittest.TestCase):
         runtime.emit(
             InferenceClaimedEvent(
                 event_id="claim-1", timestamp=0.0,
-                principal=Principal.PROVER, source="prover",
-                readers=TRANSCRIPT_READERS,
+                writer=Role.PROVER, readers=TRANSCRIPT_READERS,
                 request_id="req-1", model_id="model-a",
                 input_digest="in", output_digest="out",
                 artifact_ref=CorrectnessArtifactRef(artifact_id="a1"),
@@ -65,8 +60,7 @@ class ComplianceDisclosureFlowTest(unittest.TestCase):
         runtime.emit(
             InferenceClaimedEvent(
                 event_id="claim-1", timestamp=0.0,
-                principal=Principal.PROVER, source="prover",
-                readers=TRANSCRIPT_READERS,
+                writer=Role.PROVER, readers=TRANSCRIPT_READERS,
                 request_id="req-1", model_id="model-b",
                 input_digest="in", output_digest="out",
                 artifact_ref=CorrectnessArtifactRef(artifact_id="a1"),

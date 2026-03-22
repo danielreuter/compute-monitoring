@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from event_log import EventLog, Principal, TRANSCRIPT_READERS
+from event_log import EventLog, Role, TRANSCRIPT_READERS
 from protocols.transparency.utilization import (
     MemorySanitizationPerformedEvent,
     SanitizationFrequencyEvaluatedEvent,
@@ -14,8 +14,7 @@ from runtime.engine import Runtime
 def _make_attestation(event_id: str, timestamp: float) -> MemorySanitizationPerformedEvent:
     return MemorySanitizationPerformedEvent(
         event_id=event_id, timestamp=timestamp,
-        principal=Principal.PROVER, source="prover",
-        readers=TRANSCRIPT_READERS,
+        writer=Role.PROVER, readers=TRANSCRIPT_READERS,
         machine_id="gpu-0", epoch=1, merkle_root="root",
         spot_check_passed=True,
     )

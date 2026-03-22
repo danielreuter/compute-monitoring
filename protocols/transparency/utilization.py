@@ -11,7 +11,7 @@ from typing import ClassVar
 from event_log import (
     Event,
     EventView,
-    Principal,
+    Role,
     TRANSCRIPT_READERS,
     VERIFICATION_READERS,
 )
@@ -135,7 +135,7 @@ class CovertCapacityEstimatedEvent(Event):
 
 @dataclass
 class ScheduleCoverageVerifier:
-    principal: Principal = field(default=Principal.VERIFIER, init=False)
+    writer: Role = field(default=Role.VERIFIER, init=False)
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
         return []
@@ -147,8 +147,7 @@ class ScheduleCoverageVerifier:
             ScheduleCoverageEvaluatedEvent(
                 event_id=runtime.make_event_id("schedule-coverage"),
                 timestamp=runtime.now,
-                principal=Principal.VERIFIER,
-                source="schedule_coverage_verifier",
+                writer=Role.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=True,
                 details=f"{len(started)} started, {len(terminated)} terminated",
@@ -158,7 +157,7 @@ class ScheduleCoverageVerifier:
 
 @dataclass
 class SanitizationFrequencyVerifier:
-    principal: Principal = field(default=Principal.VERIFIER, init=False)
+    writer: Role = field(default=Role.VERIFIER, init=False)
     max_gap_seconds: float = 5.0
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
@@ -178,8 +177,7 @@ class SanitizationFrequencyVerifier:
             SanitizationFrequencyEvaluatedEvent(
                 event_id=runtime.make_event_id("sanitization-frequency"),
                 timestamp=runtime.now,
-                principal=Principal.VERIFIER,
-                source="sanitization_frequency_verifier",
+                writer=Role.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=len(gaps) == 0,
                 gap_count=len(gaps),
@@ -191,7 +189,7 @@ class SanitizationFrequencyVerifier:
 
 @dataclass
 class NetworkUtilizationVerifier:
-    principal: Principal = field(default=Principal.VERIFIER, init=False)
+    writer: Role = field(default=Role.VERIFIER, init=False)
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
         return []
@@ -202,8 +200,7 @@ class NetworkUtilizationVerifier:
             NetworkUtilizationEvaluatedEvent(
                 event_id=runtime.make_event_id("network-utilization"),
                 timestamp=runtime.now,
-                principal=Principal.VERIFIER,
-                source="network_utilization_verifier",
+                writer=Role.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=True,
                 details=f"{len(observations)} network observations",
@@ -213,7 +210,7 @@ class NetworkUtilizationVerifier:
 
 @dataclass
 class CovertCapacityEstimator:
-    principal: Principal = field(default=Principal.VERIFIER, init=False)
+    writer: Role = field(default=Role.VERIFIER, init=False)
     sram_per_gpu_bytes: int = 0
     num_gpus: int = 0
     excess_capacity_bytes: int = 0
@@ -228,8 +225,7 @@ class CovertCapacityEstimator:
             CovertCapacityEstimatedEvent(
                 event_id=runtime.make_event_id("covert-capacity"),
                 timestamp=runtime.now,
-                principal=Principal.VERIFIER,
-                source="covert_capacity_estimator",
+                writer=Role.VERIFIER,
                 readers=VERIFICATION_READERS,
                 io_capacity_bits=0.0,
                 persistence_capacity_bytes=persistence,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from event_log import EventLog, Principal, TRANSCRIPT_READERS
+from event_log import EventLog, Role, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessArtifactPublishedEvent,
     CorrectnessArtifactRef,
@@ -46,8 +46,7 @@ class CorrectnessReexecutionFlowTest(unittest.TestCase):
             InferenceClaimedEvent(
                 event_id=runtime.make_event_id("inference-claimed"),
                 timestamp=0.0,
-                principal=Principal.PROVER,
-                source="prover",
+                writer=Role.PROVER,
                 readers=TRANSCRIPT_READERS,
                 request_id="req-1",
                 model_id="model-a",

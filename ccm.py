@@ -49,7 +49,7 @@ def render_summary(log: EventLog) -> str:
         if event is None:
             continue
         status = "PASS" if event.passed else "FAIL"
-        lines.append(f"  [{status}] {event.source}: {event.details}")
+        lines.append(f"  [{status}] {type(event).__name__}: {event.details}")
 
     capacity_event = _latest_of_type(log, CovertCapacityEstimatedEvent)
     if capacity_event is not None:

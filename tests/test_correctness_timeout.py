@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from event_log import Event, EventLog, Principal, TRANSCRIPT_READERS
+from event_log import Event, EventLog, Role, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessArtifactRef,
     CorrectnessCheckRequestedEvent,
@@ -18,7 +18,7 @@ from runtime.engine import Runtime
 @dataclass
 class NoOpParticipant:
     """A prover that never responds to correctness checks."""
-    principal: Principal = Principal.PROVER
+    writer: Role = Role.PROVER
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
         return []
@@ -42,8 +42,7 @@ class CorrectnessTimeoutTest(unittest.TestCase):
         runtime.emit(
             InferenceClaimedEvent(
                 event_id="claim-1", timestamp=0.0,
-                principal=Principal.PROVER, source="prover",
-                readers=TRANSCRIPT_READERS,
+                writer=Role.PROVER, readers=TRANSCRIPT_READERS,
                 request_id="req-1", model_id="model-a",
                 input_digest="in", output_digest="out",
                 artifact_ref=CorrectnessArtifactRef(artifact_id="a1"),

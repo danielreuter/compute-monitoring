@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from event_log import EventLog, Principal, VERIFICATION_READERS
+from event_log import EventLog, Role, VERIFICATION_READERS
 from protocols.transparency.utilization import (
     EngineStopAcknowledgedEvent,
     EngineStopRequestedEvent,
@@ -22,8 +22,7 @@ class UtilizationControlFlowTest(unittest.TestCase):
         runtime.emit(
             EngineStopRequestedEvent(
                 event_id="stop-1", timestamp=0.0,
-                principal=Principal.VERIFIER, source="verifier",
-                readers=VERIFICATION_READERS,
+                writer=Role.VERIFIER, readers=VERIFICATION_READERS,
                 session_id="session-1", reason="test stop",
             )
         )

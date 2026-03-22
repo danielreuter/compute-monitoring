@@ -130,6 +130,98 @@ class CovertCapacityEstimatedEvent(Event):
     views: ClassVar[frozenset[EventView]] = frozenset({EventView.VERIFICATION})
 
 
+# --- Prover participant ---
+
+
+@dataclass
+class UtilizationProver:
+    writer: Role = field(default=Role.PROVER, init=False)
+
+    _pending_workloads: list[tuple[str, str, bool]] = field(
+        default_factory=list, init=False, repr=False
+    )
+    _pending_sanitizations: list[tuple[str, int, str, bool]] = field(
+        default_factory=list, init=False, repr=False
+    )
+
+    def report_workload_started(self, workload_id: str, machine_id: str) -> None:
+        self._pending_workloads.append((workload_id, machine_id, True))
+
+    def report_workload_terminated(self, workload_id: str, machine_id: str) -> None:
+        self._pending_workloads.append((workload_id, machine_id, False))
+
+    def report_sanitization(
+        self,
+        machine_id: str,
+        epoch: int,
+        merkle_root: str,
+        spot_check_passed: bool = True,
+    ) -> None:
+        self._pending_sanitizations.append(
+            (machine_id, epoch, merkle_root, spot_check_passed)
+        )
+
+    def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
+        if isinstance(event, EngineStopRequestedEvent):
+            return [
+                EngineStopAcknowledgedEvent(
+                    event_id=runtime.make_event_id("engine-stop-ack"),
+                    timestamp=runtime.now,
+                    writer=Role.PROVER,
+                    readers=VERIFICATION_READERS,
+                    session_id=event.session_id,
+                    succeeded=True,
+                    details="engine stopped",
+                )
+            ]
+        return []
+
+    def on_tick(self, runtime: Runtime) -> list[Event]:
+        events: list[Event] = []
+
+        for workload_id, machine_id, started in self._pending_workloads:
+            if started:
+                events.append(
+                    WorkloadStartedEvent(
+                        event_id=runtime.make_event_id("workload-started"),
+                        timestamp=runtime.now,
+                        writer=Role.PROVER,
+                        readers=TRANSCRIPT_READERS,
+                        workload_id=workload_id,
+                        machine_id=machine_id,
+                    )
+                )
+            else:
+                events.append(
+                    WorkloadTerminatedEvent(
+                        event_id=runtime.make_event_id("workload-terminated"),
+                        timestamp=runtime.now,
+                        writer=Role.PROVER,
+                        readers=TRANSCRIPT_READERS,
+                        workload_id=workload_id,
+                        machine_id=machine_id,
+                    )
+                )
+        self._pending_workloads.clear()
+
+        for machine_id, epoch, merkle_root, spot_check_passed in self._pending_sanitizations:
+            events.append(
+                MemorySanitizationPerformedEvent(
+                    event_id=runtime.make_event_id("sanitization"),
+                    timestamp=runtime.now,
+                    writer=Role.PROVER,
+                    readers=TRANSCRIPT_READERS,
+                    machine_id=machine_id,
+                    epoch=epoch,
+                    merkle_root=merkle_root,
+                    spot_check_passed=spot_check_passed,
+                )
+            )
+        self._pending_sanitizations.clear()
+
+        return events
+
+
 # --- Verifier participants ---
 
 

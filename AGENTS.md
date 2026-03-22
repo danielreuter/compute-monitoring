@@ -8,32 +8,28 @@ A single-process, deterministic simulation of a prover/verifier monitoring syste
 
 There is one shared append-only `EventLog`. A `Runtime` drives a deterministic dispatch loop. Participants implement `on_event` and `on_tick` to read from and write to the log. That's the whole thing.
 
-### The two principals
+### Per-protocol prover/verifier pairs
 
-- **Prover**: an instrumented runtime wrapping real compute infrastructure. It observes what the underlying system did and emits transcript events that the monitoring protocol requires.
-- **Verifier(s)**: protocol participants that consume transcript events and produce verification, compliance, and disclosure events.
+Each protocol defines its own prover and verifier as co-located participants in the same file:
 
-### Key design principle: adapters are feeds, not commands
+- **Prover participants** hold internal state, expose methods for the outside world to push data in (e.g. `report_inference()`, `report_sanitization()`), and emit transcript events on each tick.
+- **Verifier participants** consume transcript events and produce verification, compliance, and disclosure events.
 
-The prover does not *cause* inference or workload scheduling. Those happen independently, outside the monitoring system. The prover's job is to observe what happened and report it.
-
-Adapters are the boundary between "the real world" and "the monitoring system's view of it." They answer "what happened since last time?" — not "do this thing."
+There is no central `ProverRuntime` — each protocol owns its prover's behavior. Callers (tests, real infrastructure) write directly to the prover participants.
 
 ```
-Real compute world          Adapter boundary         Monitoring system
-─────────────────          ────────────────         ─────────────────
-inference completes   →    pending_claims()    →    InferenceClaimedEvent
-workload starts       →    pending_changes()   →    WorkloadStartedEvent
-sanitization runs     →    pending_attestations() → MemorySanitizationPerformedEvent
+Real compute world              Prover participant          Monitoring system
+─────────────────              ──────────────────          ─────────────────
+inference completes   →    prover.report_inference()  →    InferenceClaimedEvent
+workload starts       →    prover.report_workload_started() → WorkloadStartedEvent
+sanitization runs     →    prover.report_sanitization()   → MemorySanitizationPerformedEvent
 ```
-
-On each tick, `ProverRuntime.on_tick` drains all adapters and emits the corresponding protocol-required transcript events. The prover never reaches outside the participant contract to emit events — everything flows through `on_tick` (for reporting) and `on_event` (for responding to verifier requests).
 
 ### Why transcript events exist
 
 Transcript events are not natural byproducts of compute. They exist because the verification protocol requires them. In a world with no monitoring system, the prover just runs inference and tells nobody. The transcript is the prover's obligation under the protocol: "if you want to be verified as compliant, you must emit these claims."
 
-This is why transcript events live in the protocol modules (`protocols/transparency/correctness.py`, etc.) rather than with the prover — they are defined by what verification needs, not by what the prover happens to do.
+This is why transcript events and prover participants live in the protocol modules (`protocols/transparency/correctness.py`, etc.) rather than in the runtime — they are defined by what verification needs, not by what the prover happens to do.
 
 ### Runtime semantics
 
@@ -58,18 +54,16 @@ event_log.py                                 Event, EventLog, Role, EventView
 runtime/
     base.py                                  Participant protocol
     engine.py                                Runtime driver
-    prover.py                                ProverRuntime + adapter interfaces
 protocols/
     transparency/
-        correctness.py                       InferenceClaimedEvent, CorrectnessVerifier, reexecution
-        utilization.py                       Machine/workload/sanitization events, utilization verifiers
+        correctness.py                       CorrectnessProver, CorrectnessVerifier, reexecution
+        utilization.py                       UtilizationProver, utilization verifiers
         remote_attestation.py                Attestation events, RemoteAttestationVerifier
     compliance.py                            ComplianceVerifier
     disclosure.py                            DisclosurePublisher
 examples/
     simple_inference.py                      End-to-end demo
 tests/
-    _toy_adapters.py                         Shared test adapter implementations
     test_*.py                                unittest-based tests
 ccm.py                                      Thin façade, render_summary() debug helper
 ```
@@ -78,8 +72,8 @@ ccm.py                                      Thin façade, render_summary() debug
 
 ```bash
 # Run the example
-.venv/bin/python -m examples.simple_inference
+python3.12 -m examples.simple_inference
 
 # Run tests
-.venv/bin/python -m unittest discover -s tests
+python3.12 -m unittest discover -s tests
 ```

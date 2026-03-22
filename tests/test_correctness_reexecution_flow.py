@@ -8,25 +8,22 @@ from protocols.transparency.correctness import (
     CorrectnessArtifactRef,
     CorrectnessCheckRequestedEvent,
     CorrectnessEvaluatedEvent,
+    CorrectnessProver,
     CorrectnessVerifier,
     InferenceClaimedEvent,
     ReexecutionBundle,
     ReexecutionStrategy,
 )
 from runtime.engine import Runtime
-from tests._toy_adapters import ToyInferenceAdapter, make_prover
 
 
 class CorrectnessReexecutionFlowTest(unittest.TestCase):
     def _build_runtime(self, *, rerun_digest: str = "out-digest") -> Runtime:
-        inference = ToyInferenceAdapter()
-        prover = make_prover(inference=inference)
+        prover = CorrectnessProver()
 
-        # Simulate an inference completing in the adapter
-        record = inference.record_inference("req-1", "model-a", b"hello")
-        # Override the output digest so we can control match/mismatch
-        # (the toy adapter computes its own digest, so we pre-store a bundle
-        # with a known digest for the test)
+        # Simulate an inference completing
+        ref = prover.report_inference("req-1", "model-a", b"hello")
+        # Override the bundle with a known digest so we can control match/mismatch
         known_bundle = ReexecutionBundle(
             model_id="model-a",
             input_bytes=b"hello",
@@ -34,10 +31,7 @@ class CorrectnessReexecutionFlowTest(unittest.TestCase):
             engine_digest="",
             metadata={},
         )
-        inference._bundles[record.artifact_ref.artifact_id] = known_bundle
-        # Also patch the pending record to use the known digest
-        inference._pending.clear()
-        inference._pending.append(record)
+        prover._bundles[ref.artifact_id] = known_bundle
 
         strategy = ReexecutionStrategy(rerun=lambda b: rerun_digest)
         verifier = CorrectnessVerifier(strategy=strategy, sample_fraction=1.0)
@@ -47,7 +41,7 @@ class CorrectnessReexecutionFlowTest(unittest.TestCase):
             participants=[prover, verifier],  # type: ignore[list-item]
         )
 
-        # First tick: prover drains adapter -> InferenceClaimedEvent,
+        # First tick: prover emits InferenceClaimedEvent,
         # verifier samples -> CorrectnessCheckRequestedEvent,
         # prover responds -> CorrectnessArtifactPublishedEvent,
         # verifier evaluates -> CorrectnessEvaluatedEvent

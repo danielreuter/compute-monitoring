@@ -6,14 +6,14 @@ from event_log import EventLog, Role, VERIFICATION_READERS
 from protocols.transparency.utilization import (
     EngineStopAcknowledgedEvent,
     EngineStopRequestedEvent,
+    UtilizationProver,
 )
 from runtime.engine import Runtime
-from tests._toy_adapters import make_prover
 
 
 class UtilizationControlFlowTest(unittest.TestCase):
     def test_engine_stop_flow(self) -> None:
-        prover = make_prover()
+        prover = UtilizationProver()
         runtime = Runtime(
             log=EventLog(),
             participants=[prover],  # type: ignore[list-item]

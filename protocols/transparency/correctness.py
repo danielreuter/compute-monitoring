@@ -4,6 +4,7 @@ Correctness transparency: inference claims, reexecution verification, and artifa
 
 from __future__ import annotations
 
+import hashlib
 import random
 from dataclasses import dataclass, field
 from typing import Callable, ClassVar, Protocol
@@ -113,6 +114,86 @@ class ReexecutionStrategy:
         passed = recomputed_digest == bundle.output_digest
         details = "match" if passed else f"mismatch: expected {bundle.output_digest}, got {recomputed_digest}"
         return passed, details
+
+
+# --- Prover participant ---
+
+
+@dataclass
+class CorrectnessProver:
+    writer: Role = field(default=Role.PROVER, init=False)
+
+    _pending: list[tuple[str, str, str, str, CorrectnessArtifactRef]] = field(
+        default_factory=list, init=False, repr=False
+    )
+    _bundles: dict[str, ReexecutionBundle] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    def report_inference(
+        self,
+        request_id: str,
+        model_id: str,
+        input_bytes: bytes,
+    ) -> CorrectnessArtifactRef:
+        """Record an inference completion. Returns the artifact ref."""
+        output = f"output-for-{request_id}".encode()
+        output_digest = hashlib.sha256(output).hexdigest()[:16]
+        input_digest = hashlib.sha256(input_bytes).hexdigest()[:16]
+        ref = CorrectnessArtifactRef(artifact_id=f"artifact-{request_id}")
+        bundle = ReexecutionBundle(
+            model_id=model_id,
+            input_bytes=input_bytes,
+            output_digest=output_digest,
+            engine_digest="",
+            metadata={},
+        )
+        self._bundles[ref.artifact_id] = bundle
+        self._pending.append((request_id, model_id, input_digest, output_digest, ref))
+        return ref
+
+    def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
+        if isinstance(event, CorrectnessCheckRequestedEvent):
+            return self._handle_correctness_check(event, runtime)
+        return []
+
+    def on_tick(self, runtime: Runtime) -> list[Event]:
+        events: list[Event] = []
+        for request_id, model_id, input_digest, output_digest, ref in self._pending:
+            events.append(
+                InferenceClaimedEvent(
+                    event_id=runtime.make_event_id("inference-claimed"),
+                    timestamp=runtime.now,
+                    writer=Role.PROVER,
+                    readers=TRANSCRIPT_READERS,
+                    request_id=request_id,
+                    model_id=model_id,
+                    input_digest=input_digest,
+                    output_digest=output_digest,
+                    artifact_ref=ref,
+                )
+            )
+        self._pending.clear()
+        return events
+
+    def _handle_correctness_check(
+        self, event: CorrectnessCheckRequestedEvent, runtime: Runtime
+    ) -> list[Event]:
+        bundle = self._bundles.get(event.artifact_ref.artifact_id)
+        if bundle is None:
+            return []
+        return [
+            CorrectnessArtifactPublishedEvent(
+                event_id=runtime.make_event_id("artifact-published"),
+                timestamp=runtime.now,
+                writer=Role.PROVER,
+                readers=VERIFICATION_READERS,
+                session_id=event.session_id,
+                in_reply_to=event.event_id,
+                artifact_ref=event.artifact_ref,
+                bundle=bundle,
+            )
+        ]
 
 
 # --- Verifier participant ---

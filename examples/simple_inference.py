@@ -1,22 +1,19 @@
 """
 Simple inference example: demonstrates the full monitoring system in one process.
 
-The example script acts as "the real world" — it pushes records into the prover's
-adapters to simulate compute activity, then advances the runtime clock. The prover
-drains those adapters on each tick and emits the protocol-required transcript events.
-The verifiers consume the transcript and produce verification/compliance/disclosure.
+The example script acts as "the real world" — it pushes records directly into
+the prover participants to simulate compute activity, then advances the runtime
+clock. The provers drain their pending state on each tick and emit the
+protocol-required transcript events. The verifiers consume the transcript and
+produce verification/compliance/disclosure.
 """
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass, field
-
 from event_log import EventLog, Role, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
-    CorrectnessArtifactRef,
+    CorrectnessProver,
     CorrectnessVerifier,
-    ReexecutionBundle,
     ReexecutionStrategy,
 )
 from protocols.transparency.utilization import (
@@ -25,6 +22,7 @@ from protocols.transparency.utilization import (
     NetworkUtilizationVerifier,
     SanitizationFrequencyVerifier,
     ScheduleCoverageVerifier,
+    UtilizationProver,
 )
 from protocols.transparency.remote_attestation import (
     RemoteAttestationClaimedEvent,
@@ -33,38 +31,21 @@ from protocols.transparency.remote_attestation import (
 from protocols.compliance import ComplianceVerifier
 from protocols.disclosure import DisclosurePublisher
 from runtime.engine import Runtime
-from runtime.prover import ProverRuntime
-from tests._toy_adapters import (
-    ToyControlAdapter,
-    ToyInferenceAdapter,
-    ToySanitizationAdapter,
-    ToySchedulerAdapter,
-)
 
 
-def _toy_rerun(bundle: ReexecutionBundle) -> str:
+def _toy_rerun(bundle):
     """Deterministic rerun that always matches."""
     return bundle.output_digest
 
 
-def build_runtime() -> tuple[
-    Runtime, ToyInferenceAdapter, ToySchedulerAdapter, ToySanitizationAdapter
-]:
-    """Build the full monitoring runtime with toy adapters."""
-    inference = ToyInferenceAdapter()
-    scheduler = ToySchedulerAdapter()
-    sanitization = ToySanitizationAdapter()
-    control = ToyControlAdapter()
-
-    prover = ProverRuntime(
-        inference=inference,
-        scheduler=scheduler,
-        sanitization=sanitization,
-        control=control,
-    )
+def build_runtime() -> tuple[Runtime, CorrectnessProver, UtilizationProver]:
+    """Build the full monitoring runtime."""
+    correctness_prover = CorrectnessProver()
+    utilization_prover = UtilizationProver()
 
     participants = [
-        prover,
+        correctness_prover,
+        utilization_prover,
         CorrectnessVerifier(
             strategy=ReexecutionStrategy(rerun=_toy_rerun),
             sample_fraction=1.0,
@@ -90,14 +71,14 @@ def build_runtime() -> tuple[
         participants=participants,  # type: ignore[arg-type]
         now=0.0,
     )
-    return runtime, inference, scheduler, sanitization
+    return runtime, correctness_prover, utilization_prover
 
 
 def run_example() -> Runtime:
     """Run the simple inference example and return the runtime."""
-    runtime, inference, scheduler, sanitization = build_runtime()
+    runtime, correctness_prover, utilization_prover = build_runtime()
 
-    # --- The "real world" pushes activity into the adapters ---
+    # --- The "real world" pushes activity into the provers ---
 
     # Machine comes online (emitted directly as a seed event — machine inventory
     # isn't periodic, it's a one-time bootstrap)
@@ -127,15 +108,15 @@ def run_example() -> Runtime:
     runtime.dispatch_until_quiescent()
 
     # Workload starts, sanitization happens, inference completes
-    scheduler.start_workload("w1", "gpu-node-0")
-    sanitization.record_sanitization("gpu-node-0", epoch=1, merkle_root="root-1")
-    inference.record_inference("req-1", "model-a", b"hello world")
+    utilization_prover.report_workload_started("w1", "gpu-node-0")
+    utilization_prover.report_sanitization("gpu-node-0", epoch=1, merkle_root="root-1")
+    correctness_prover.report_inference("req-1", "model-a", b"hello world")
 
-    # First tick: prover drains adapters, verifiers begin sampling
+    # First tick: provers drain pending state, verifiers begin sampling
     runtime.tick(delta=1.0)
 
     # More sanitization
-    sanitization.record_sanitization("gpu-node-0", epoch=2, merkle_root="root-2")
+    utilization_prover.report_sanitization("gpu-node-0", epoch=2, merkle_root="root-2")
 
     # Second tick: correctness artifact exchange completes, compliance + disclosure
     runtime.tick(delta=1.0)

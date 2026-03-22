@@ -10,10 +10,10 @@ from typing import ClassVar
 from event_log import (
     Event,
     EventView,
-    Role,
+    Side,
     VERIFICATION_READERS,
 )
-from runtime.base import Participant
+from runtime.base import Role
 from runtime.engine import Runtime
 
 
@@ -37,12 +37,12 @@ class RemoteAttestationEvaluatedEvent(Event):
     views: ClassVar[frozenset[EventView]] = frozenset({EventView.VERIFICATION})
 
 
-# --- Participant ---
+# --- Role ---
 
 
 @dataclass
 class RemoteAttestationVerifier:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
     trusted_code_digests: frozenset[str] = frozenset()
     trusted_config_digests: frozenset[str] = frozenset()
 
@@ -80,7 +80,7 @@ class RemoteAttestationVerifier:
             RemoteAttestationEvaluatedEvent(
                 event_id=runtime.make_event_id("attestation-evaluated"),
                 timestamp=runtime.now,
-                writer=Role.VERIFIER,
+                writer=Side.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=passed,
                 details=details,

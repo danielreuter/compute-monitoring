@@ -9,13 +9,13 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from event_log import Event, EventLog
-from runtime.base import Participant
+from runtime.base import Role
 
 
 @dataclass
 class Runtime:
     log: EventLog
-    participants: list[Participant]
+    participants: list[Role]
     now: float = 0.0
 
     _queue: deque[Event] = field(default_factory=deque, init=False, repr=False)

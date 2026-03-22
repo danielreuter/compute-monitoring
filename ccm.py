@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TypeVar
 
 from event_log import Event, EventLog
-from runtime import Participant, Runtime  # noqa: F401 — re-export
+from runtime import Role, Runtime  # noqa: F401 — re-export
 from protocols.transparency.correctness import CorrectnessEvaluatedEvent
 from protocols.transparency.utilization import (
     CovertCapacityEstimatedEvent,

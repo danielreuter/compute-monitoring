@@ -11,10 +11,10 @@ from event_log import (
     DISCLOSURE_READERS,
     Event,
     EventView,
-    Role,
+    Side,
 )
 from protocols.compliance import ComplianceEvaluatedEvent
-from runtime.base import Participant
+from runtime.base import Role
 from runtime.engine import Runtime
 
 
@@ -28,7 +28,7 @@ class DisclosurePublishedEvent(Event):
 
 @dataclass
 class DisclosurePublisher:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
 
     _emitted: bool = field(default=False, init=False, repr=False)
 
@@ -44,7 +44,7 @@ class DisclosurePublisher:
                 DisclosurePublishedEvent(
                     event_id=runtime.make_event_id("disclosure"),
                     timestamp=runtime.now,
-                    writer=Role.VERIFIER,
+                    writer=Side.VERIFIER,
                     readers=DISCLOSURE_READERS,
                     compliant=event.passed,
                     summary=summary,

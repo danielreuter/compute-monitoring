@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from event_log import EventLog, Role, TRANSCRIPT_READERS
+from event_log import EventLog, Side, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessArtifactPublishedEvent,
     CorrectnessArtifactRef,

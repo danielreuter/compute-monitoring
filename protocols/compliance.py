@@ -10,7 +10,7 @@ from typing import ClassVar
 from event_log import (
     Event,
     EventView,
-    Role,
+    Side,
     VERIFICATION_READERS,
 )
 from protocols.transparency.correctness import (
@@ -23,7 +23,7 @@ from protocols.transparency.utilization import (
     SanitizationFrequencyEvaluatedEvent,
     ScheduleCoverageEvaluatedEvent,
 )
-from runtime.base import Participant
+from runtime.base import Role
 from runtime.engine import Runtime
 
 
@@ -37,7 +37,7 @@ class ComplianceEvaluatedEvent(Event):
 
 @dataclass
 class ComplianceVerifier:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
     approved_models: frozenset[str] = frozenset()
 
     _emitted: bool = field(default=False, init=False, repr=False)
@@ -99,7 +99,7 @@ class ComplianceVerifier:
             ComplianceEvaluatedEvent(
                 event_id=runtime.make_event_id("compliance"),
                 timestamp=runtime.now,
-                writer=Role.VERIFIER,
+                writer=Side.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=passed,
                 details=details,

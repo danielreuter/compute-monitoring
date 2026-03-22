@@ -7,68 +7,113 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 
-from event_log import Event
 from protocols.transparency.correctness import CorrectnessArtifactRef, ReexecutionBundle
 from runtime.prover import (
-    CorrectnessArtifactStore,
-    InferenceRunResult,
+    InferenceRecord,
     ProverRuntime,
+    SanitizationRecord,
+    SchedulerRecord,
 )
 
 
 @dataclass
-class ToyScheduler:
-    def start_workload(self, workload_id: str, node_id: str) -> list[Event]:
-        return []
+class ToyInferenceAdapter:
+    """Accumulates inference records; drained by ProverRuntime.on_tick."""
+    _pending: list[InferenceRecord] = field(default_factory=list)
+    _bundles: dict[str, ReexecutionBundle] = field(default_factory=dict)
 
-    def stop_workload(self, workload_id: str, node_id: str) -> list[Event]:
-        return []
+    def pending_claims(self) -> list[InferenceRecord]:
+        claims = list(self._pending)
+        self._pending.clear()
+        return claims
 
-
-@dataclass
-class ToyInference:
-    def run_inference(
-        self, request_id: str, model_id: str, input_bytes: bytes
-    ) -> InferenceRunResult:
-        output = f"output-for-{request_id}".encode()
-        digest = hashlib.sha256(output).hexdigest()[:16]
-        return InferenceRunResult(
-            output_bytes=output,
-            output_digest=digest,
-            artifact_ref=CorrectnessArtifactRef(artifact_id=f"artifact-{request_id}"),
-        )
+    def get_bundle(self, artifact_ref: CorrectnessArtifactRef) -> ReexecutionBundle | None:
+        return self._bundles.get(artifact_ref.artifact_id)
 
     def stop_engine(self) -> None:
         pass
 
+    def record_inference(
+        self, request_id: str, model_id: str, input_bytes: bytes,
+    ) -> InferenceRecord:
+        """Simulate an inference completing — adds a pending claim."""
+        output = f"output-for-{request_id}".encode()
+        output_digest = hashlib.sha256(output).hexdigest()[:16]
+        input_digest = hashlib.sha256(input_bytes).hexdigest()[:16]
+        ref = CorrectnessArtifactRef(artifact_id=f"artifact-{request_id}")
+        bundle = ReexecutionBundle(
+            model_id=model_id,
+            input_bytes=input_bytes,
+            output_digest=output_digest,
+            engine_digest="",
+            metadata={},
+        )
+        self._bundles[ref.artifact_id] = bundle
+        record = InferenceRecord(
+            request_id=request_id,
+            model_id=model_id,
+            input_digest=input_digest,
+            output_digest=output_digest,
+            artifact_ref=ref,
+            bundle=bundle,
+        )
+        self._pending.append(record)
+        return record
+
 
 @dataclass
-class ToyControl:
+class ToySchedulerAdapter:
+    _pending: list[SchedulerRecord] = field(default_factory=list)
+
+    def pending_changes(self) -> list[SchedulerRecord]:
+        changes = list(self._pending)
+        self._pending.clear()
+        return changes
+
+    def start_workload(self, workload_id: str, machine_id: str) -> None:
+        self._pending.append(SchedulerRecord(workload_id=workload_id, machine_id=machine_id, started=True))
+
+    def stop_workload(self, workload_id: str, machine_id: str) -> None:
+        self._pending.append(SchedulerRecord(workload_id=workload_id, machine_id=machine_id, started=False))
+
+
+@dataclass
+class ToySanitizationAdapter:
+    _pending: list[SanitizationRecord] = field(default_factory=list)
+
+    def pending_attestations(self) -> list[SanitizationRecord]:
+        attestations = list(self._pending)
+        self._pending.clear()
+        return attestations
+
+    def record_sanitization(
+        self, machine_id: str, epoch: int, merkle_root: str, spot_check_passed: bool = True,
+    ) -> None:
+        self._pending.append(SanitizationRecord(
+            machine_id=machine_id, epoch=epoch, merkle_root=merkle_root,
+            spot_check_passed=spot_check_passed,
+        ))
+
+
+@dataclass
+class ToyControlAdapter:
     def handle_command(self, command: str, payload: dict[str, object]) -> str:
         return "ok"
 
 
-@dataclass
-class InMemoryArtifactStore:
-    _store: dict[str, ReexecutionBundle] = field(default_factory=dict)
-
-    def store(self, ref: CorrectnessArtifactRef, bundle: ReexecutionBundle) -> None:
-        self._store[ref.artifact_id] = bundle
-
-    def get(self, artifact_ref: CorrectnessArtifactRef) -> ReexecutionBundle | None:
-        return self._store.get(artifact_ref.artifact_id)
-
-
-def make_artifact_store() -> InMemoryArtifactStore:
-    return InMemoryArtifactStore()
+def make_adapters() -> tuple[ToyInferenceAdapter, ToySchedulerAdapter, ToySanitizationAdapter, ToyControlAdapter]:
+    return ToyInferenceAdapter(), ToySchedulerAdapter(), ToySanitizationAdapter(), ToyControlAdapter()
 
 
 def make_prover(
-    artifacts: CorrectnessArtifactStore | None = None,
+    inference: ToyInferenceAdapter | None = None,
+    scheduler: ToySchedulerAdapter | None = None,
+    sanitization: ToySanitizationAdapter | None = None,
+    control: ToyControlAdapter | None = None,
 ) -> ProverRuntime:
     return ProverRuntime(
-        scheduler=ToyScheduler(),
-        inference=ToyInference(),
-        control=ToyControl(),
-        artifacts=artifacts or make_artifact_store(),
+        inference=inference or ToyInferenceAdapter(),
+        scheduler=scheduler or ToySchedulerAdapter(),
+        sanitization=sanitization or ToySanitizationAdapter(),
+        control=control or ToyControlAdapter(),
     )

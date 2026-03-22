@@ -1,5 +1,10 @@
 """
 Simple inference example: demonstrates the full monitoring system in one process.
+
+The example script acts as "the real world" — it pushes records into the prover's
+adapters to simulate compute activity, then advances the runtime clock. The prover
+drains those adapters on each tick and emits the protocol-required transcript events.
+The verifiers consume the transcript and produce verification/compliance/disclosure.
 """
 
 from __future__ import annotations
@@ -7,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 
-from event_log import Event, EventLog, Role, TRANSCRIPT_READERS
+from event_log import EventLog, Role, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessArtifactRef,
     CorrectnessVerifier,
@@ -17,11 +22,9 @@ from protocols.transparency.correctness import (
 from protocols.transparency.utilization import (
     CovertCapacityEstimator,
     MachineAddedEvent,
-    MemorySanitizationPerformedEvent,
     NetworkUtilizationVerifier,
     SanitizationFrequencyVerifier,
     ScheduleCoverageVerifier,
-    WorkloadStartedEvent,
 )
 from protocols.transparency.remote_attestation import (
     RemoteAttestationClaimedEvent,
@@ -30,60 +33,13 @@ from protocols.transparency.remote_attestation import (
 from protocols.compliance import ComplianceVerifier
 from protocols.disclosure import DisclosurePublisher
 from runtime.engine import Runtime
-from runtime.prover import (
-    CorrectnessArtifactStore,
-    InferenceRunResult,
-    ProverControlAdapter,
-    ProverInferenceAdapter,
-    ProverRuntime,
-    ProverSchedulerAdapter,
+from runtime.prover import ProverRuntime
+from tests._toy_adapters import (
+    ToyControlAdapter,
+    ToyInferenceAdapter,
+    ToySanitizationAdapter,
+    ToySchedulerAdapter,
 )
-
-
-# --- Toy adapter implementations ---
-
-
-@dataclass
-class ToyScheduler:
-    def start_workload(self, workload_id: str, node_id: str) -> list[Event]:
-        return []
-
-    def stop_workload(self, workload_id: str, node_id: str) -> list[Event]:
-        return []
-
-
-@dataclass
-class ToyInference:
-    def run_inference(
-        self, request_id: str, model_id: str, input_bytes: bytes
-    ) -> InferenceRunResult:
-        output = f"output-for-{request_id}".encode()
-        digest = hashlib.sha256(output).hexdigest()[:16]
-        return InferenceRunResult(
-            output_bytes=output,
-            output_digest=digest,
-            artifact_ref=CorrectnessArtifactRef(artifact_id=f"artifact-{request_id}"),
-        )
-
-    def stop_engine(self) -> None:
-        pass
-
-
-@dataclass
-class ToyControl:
-    def handle_command(self, command: str, payload: dict[str, object]) -> str:
-        return "ok"
-
-
-@dataclass
-class InMemoryArtifactStore:
-    _store: dict[str, ReexecutionBundle] = field(default_factory=dict)
-
-    def store(self, ref: CorrectnessArtifactRef, bundle: ReexecutionBundle) -> None:
-        self._store[ref.artifact_id] = bundle
-
-    def get(self, artifact_ref: CorrectnessArtifactRef) -> ReexecutionBundle | None:
-        return self._store.get(artifact_ref.artifact_id)
 
 
 def _toy_rerun(bundle: ReexecutionBundle) -> str:
@@ -91,15 +47,20 @@ def _toy_rerun(bundle: ReexecutionBundle) -> str:
     return bundle.output_digest
 
 
-def build_runtime() -> Runtime:
+def build_runtime() -> tuple[
+    Runtime, ToyInferenceAdapter, ToySchedulerAdapter, ToySanitizationAdapter
+]:
     """Build the full monitoring runtime with toy adapters."""
-    artifact_store = InMemoryArtifactStore()
+    inference = ToyInferenceAdapter()
+    scheduler = ToySchedulerAdapter()
+    sanitization = ToySanitizationAdapter()
+    control = ToyControlAdapter()
 
     prover = ProverRuntime(
-        scheduler=ToyScheduler(),
-        inference=ToyInference(),
-        control=ToyControl(),
-        artifacts=artifact_store,
+        inference=inference,
+        scheduler=scheduler,
+        sanitization=sanitization,
+        control=control,
     )
 
     participants = [
@@ -124,20 +85,22 @@ def build_runtime() -> Runtime:
         DisclosurePublisher(),
     ]
 
-    return Runtime(
+    runtime = Runtime(
         log=EventLog(),
         participants=participants,  # type: ignore[arg-type]
         now=0.0,
     )
+    return runtime, inference, scheduler, sanitization
 
 
 def run_example() -> Runtime:
     """Run the simple inference example and return the runtime."""
-    runtime = build_runtime()
-    prover = runtime.participants[0]
-    assert isinstance(prover, ProverRuntime)
+    runtime, inference, scheduler, sanitization = build_runtime()
 
-    # Seed: machine added
+    # --- The "real world" pushes activity into the adapters ---
+
+    # Machine comes online (emitted directly as a seed event — machine inventory
+    # isn't periodic, it's a one-time bootstrap)
     runtime.emit(
         MachineAddedEvent(
             event_id=runtime.make_event_id("machine-added"),
@@ -149,19 +112,7 @@ def run_example() -> Runtime:
         )
     )
 
-    # Seed: workload started
-    runtime.emit(
-        WorkloadStartedEvent(
-            event_id=runtime.make_event_id("workload-started"),
-            timestamp=runtime.now,
-            writer=Role.PROVER,
-            readers=TRANSCRIPT_READERS,
-            workload_id="w1",
-            machine_id="gpu-node-0",
-        )
-    )
-
-    # Seed: remote attestation
+    # Remote attestation (also a seed — happens at boot, not periodically)
     runtime.emit(
         RemoteAttestationClaimedEvent(
             event_id=runtime.make_event_id("attestation"),
@@ -173,49 +124,20 @@ def run_example() -> Runtime:
             config_digest="config-digest-1",
         )
     )
-
-    # Seed: sanitization events (within threshold)
-    runtime.emit(
-        MemorySanitizationPerformedEvent(
-            event_id=runtime.make_event_id("sanitization"),
-            timestamp=runtime.now,
-            writer=Role.PROVER,
-            readers=TRANSCRIPT_READERS,
-            machine_id="gpu-node-0",
-            epoch=1,
-            merkle_root="root-1",
-            spot_check_passed=True,
-        )
-    )
-    runtime.now += 3.0
-    runtime.emit(
-        MemorySanitizationPerformedEvent(
-            event_id=runtime.make_event_id("sanitization"),
-            timestamp=runtime.now,
-            writer=Role.PROVER,
-            readers=TRANSCRIPT_READERS,
-            machine_id="gpu-node-0",
-            epoch=2,
-            merkle_root="root-2",
-            spot_check_passed=True,
-        )
-    )
-
-    # Dispatch seed events
     runtime.dispatch_until_quiescent()
 
-    # Prover performs one toy inference
-    prover.perform_inference(
-        runtime,
-        request_id="req-1",
-        model_id="model-a",
-        input_bytes=b"hello world",
-    )
+    # Workload starts, sanitization happens, inference completes
+    scheduler.start_workload("w1", "gpu-node-0")
+    sanitization.record_sanitization("gpu-node-0", epoch=1, merkle_root="root-1")
+    inference.record_inference("req-1", "model-a", b"hello world")
 
-    # Dispatch the inference claim
-    runtime.dispatch_until_quiescent()
+    # First tick: prover drains adapters, verifiers begin sampling
+    runtime.tick(delta=1.0)
 
-    # Tick to trigger verifier sampling, evaluation, compliance, and disclosure
+    # More sanitization
+    sanitization.record_sanitization("gpu-node-0", epoch=2, merkle_root="root-2")
+
+    # Second tick: correctness artifact exchange completes, compliance + disclosure
     runtime.tick(delta=1.0)
 
     return runtime

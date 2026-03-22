@@ -10,7 +10,7 @@ produce verification/compliance/disclosure.
 
 from __future__ import annotations
 
-from event_log import EventLog, Role, TRANSCRIPT_READERS
+from event_log import EventLog, Side, TRANSCRIPT_READERS
 from protocols.transparency.correctness import (
     CorrectnessProver,
     CorrectnessVerifier,
@@ -86,7 +86,7 @@ def run_example() -> Runtime:
         MachineAddedEvent(
             event_id=runtime.make_event_id("machine-added"),
             timestamp=runtime.now,
-            writer=Role.PROVER,
+            writer=Side.PROVER,
             readers=TRANSCRIPT_READERS,
             machine_id="gpu-node-0",
             machine_kind="gpu",
@@ -98,7 +98,7 @@ def run_example() -> Runtime:
         RemoteAttestationClaimedEvent(
             event_id=runtime.make_event_id("attestation"),
             timestamp=runtime.now,
-            writer=Role.PROVER,
+            writer=Side.PROVER,
             readers=TRANSCRIPT_READERS,
             attester_id="tee-0",
             code_digest="code-digest-1",

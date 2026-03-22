@@ -3,14 +3,14 @@ from __future__ import annotations
 import unittest
 from dataclasses import dataclass, field
 
-from event_log import Event, EventLog, Role, TRANSCRIPT_READERS
+from event_log import Event, EventLog, Side, TRANSCRIPT_READERS
 from protocols.transparency.utilization import MachineAddedEvent
 from runtime.engine import Runtime
 
 
 @dataclass
 class RecordingParticipant:
-    writer: Role = Role.VERIFIER
+    writer: Side = Side.VERIFIER
     received: list[Event] = field(default_factory=list)
     tick_count: int = 0
     events_to_emit_on_tick: list[Event] = field(default_factory=list)
@@ -33,11 +33,11 @@ class RuntimeEngineTest(unittest.TestCase):
         runtime = Runtime(log=EventLog(), participants=[p1, p2])  # type: ignore[list-item]
 
         e1 = MachineAddedEvent(
-            event_id="e1", timestamp=0.0, writer=Role.PROVER, readers=TRANSCRIPT_READERS,
+            event_id="e1", timestamp=0.0, writer=Side.PROVER, readers=TRANSCRIPT_READERS,
             machine_id="m1", machine_kind="gpu",
         )
         e2 = MachineAddedEvent(
-            event_id="e2", timestamp=0.0, writer=Role.PROVER, readers=TRANSCRIPT_READERS,
+            event_id="e2", timestamp=0.0, writer=Side.PROVER, readers=TRANSCRIPT_READERS,
             machine_id="m2", machine_kind="gpu",
         )
         runtime.emit(e1)
@@ -53,7 +53,7 @@ class RuntimeEngineTest(unittest.TestCase):
 
         @dataclass
         class OrderedParticipant:
-            writer: Role = Role.VERIFIER
+            writer: Side = Side.VERIFIER
             name: str = ""
 
             def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
@@ -73,7 +73,7 @@ class RuntimeEngineTest(unittest.TestCase):
         )
         runtime.emit(
             MachineAddedEvent(
-                event_id="e1", timestamp=0.0, writer=Role.PROVER, readers=TRANSCRIPT_READERS,
+                event_id="e1", timestamp=0.0, writer=Side.PROVER, readers=TRANSCRIPT_READERS,
                 machine_id="m1", machine_kind="gpu",
             )
         )
@@ -87,7 +87,7 @@ class RuntimeEngineTest(unittest.TestCase):
 
         # Set up an event to be emitted on tick
         e = MachineAddedEvent(
-            event_id="tick-event", timestamp=1.0, writer=Role.PROVER, readers=TRANSCRIPT_READERS,
+            event_id="tick-event", timestamp=1.0, writer=Side.PROVER, readers=TRANSCRIPT_READERS,
             machine_id="m1", machine_kind="gpu",
         )
         p.events_to_emit_on_tick = [e]

@@ -9,7 +9,7 @@ from enum import Enum
 from typing import ClassVar, Iterable
 
 
-class Role(Enum):
+class Side(Enum):
     PROVER = "prover"
     VERIFIER = "verifier"
     PROVING_PARTY = "proving_party"
@@ -22,17 +22,17 @@ class EventView(Enum):
     DISCLOSURE = "disclosure"
 
 
-TRANSCRIPT_READERS = frozenset({Role.PROVER, Role.VERIFIER})
-VERIFICATION_READERS = frozenset({Role.VERIFIER})
-DISCLOSURE_READERS = frozenset({Role.PROVING_PARTY, Role.VERIFYING_PARTY})
+TRANSCRIPT_READERS = frozenset({Side.PROVER, Side.VERIFIER})
+VERIFICATION_READERS = frozenset({Side.VERIFIER})
+DISCLOSURE_READERS = frozenset({Side.PROVING_PARTY, Side.VERIFYING_PARTY})
 
 
 @dataclass(frozen=True, kw_only=True)
 class Event:
     event_id: str
     timestamp: float
-    writer: Role
-    readers: frozenset[Role]
+    writer: Side
+    readers: frozenset[Side]
 
     views: ClassVar[frozenset[EventView]] = frozenset()
 
@@ -53,7 +53,7 @@ class EventLog:
     def in_view(self, view: EventView) -> list[Event]:
         return [event for event in self.events if view in type(event).views]
 
-    def visible_to(self, reader: Role) -> list[Event]:
+    def visible_to(self, reader: Side) -> list[Event]:
         return [event for event in self.events if reader in event.readers]
 
     def transcript(self) -> list[Event]:

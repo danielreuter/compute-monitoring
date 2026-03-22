@@ -1,8 +1,8 @@
 """
-Runtime engine and participant contracts.
+Runtime engine and role contracts.
 """
 
-from runtime.base import Participant
+from runtime.base import Role
 from runtime.engine import Runtime
 
-__all__ = ["Participant", "Runtime"]
+__all__ = ["Role", "Runtime"]

@@ -11,11 +11,11 @@ from typing import ClassVar
 from event_log import (
     Event,
     EventView,
-    Role,
+    Side,
     TRANSCRIPT_READERS,
     VERIFICATION_READERS,
 )
-from runtime.base import Participant
+from runtime.base import Role
 from runtime.engine import Runtime
 
 
@@ -130,12 +130,12 @@ class CovertCapacityEstimatedEvent(Event):
     views: ClassVar[frozenset[EventView]] = frozenset({EventView.VERIFICATION})
 
 
-# --- Prover participant ---
+# --- Prover role ---
 
 
 @dataclass
 class UtilizationProver:
-    writer: Role = field(default=Role.PROVER, init=False)
+    writer: Side = field(default=Side.PROVER, init=False)
 
     _pending_workloads: list[tuple[str, str, bool]] = field(
         default_factory=list, init=False, repr=False
@@ -167,7 +167,7 @@ class UtilizationProver:
                 EngineStopAcknowledgedEvent(
                     event_id=runtime.make_event_id("engine-stop-ack"),
                     timestamp=runtime.now,
-                    writer=Role.PROVER,
+                    writer=Side.PROVER,
                     readers=VERIFICATION_READERS,
                     session_id=event.session_id,
                     succeeded=True,
@@ -185,7 +185,7 @@ class UtilizationProver:
                     WorkloadStartedEvent(
                         event_id=runtime.make_event_id("workload-started"),
                         timestamp=runtime.now,
-                        writer=Role.PROVER,
+                        writer=Side.PROVER,
                         readers=TRANSCRIPT_READERS,
                         workload_id=workload_id,
                         machine_id=machine_id,
@@ -196,7 +196,7 @@ class UtilizationProver:
                     WorkloadTerminatedEvent(
                         event_id=runtime.make_event_id("workload-terminated"),
                         timestamp=runtime.now,
-                        writer=Role.PROVER,
+                        writer=Side.PROVER,
                         readers=TRANSCRIPT_READERS,
                         workload_id=workload_id,
                         machine_id=machine_id,
@@ -209,7 +209,7 @@ class UtilizationProver:
                 MemorySanitizationPerformedEvent(
                     event_id=runtime.make_event_id("sanitization"),
                     timestamp=runtime.now,
-                    writer=Role.PROVER,
+                    writer=Side.PROVER,
                     readers=TRANSCRIPT_READERS,
                     machine_id=machine_id,
                     epoch=epoch,
@@ -222,12 +222,12 @@ class UtilizationProver:
         return events
 
 
-# --- Verifier participants ---
+# --- Verifier roles ---
 
 
 @dataclass
 class ScheduleCoverageVerifier:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
         return []
@@ -239,7 +239,7 @@ class ScheduleCoverageVerifier:
             ScheduleCoverageEvaluatedEvent(
                 event_id=runtime.make_event_id("schedule-coverage"),
                 timestamp=runtime.now,
-                writer=Role.VERIFIER,
+                writer=Side.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=True,
                 details=f"{len(started)} started, {len(terminated)} terminated",
@@ -249,7 +249,7 @@ class ScheduleCoverageVerifier:
 
 @dataclass
 class SanitizationFrequencyVerifier:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
     max_gap_seconds: float = 5.0
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
@@ -269,7 +269,7 @@ class SanitizationFrequencyVerifier:
             SanitizationFrequencyEvaluatedEvent(
                 event_id=runtime.make_event_id("sanitization-frequency"),
                 timestamp=runtime.now,
-                writer=Role.VERIFIER,
+                writer=Side.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=len(gaps) == 0,
                 gap_count=len(gaps),
@@ -281,7 +281,7 @@ class SanitizationFrequencyVerifier:
 
 @dataclass
 class NetworkUtilizationVerifier:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]:
         return []
@@ -292,7 +292,7 @@ class NetworkUtilizationVerifier:
             NetworkUtilizationEvaluatedEvent(
                 event_id=runtime.make_event_id("network-utilization"),
                 timestamp=runtime.now,
-                writer=Role.VERIFIER,
+                writer=Side.VERIFIER,
                 readers=VERIFICATION_READERS,
                 passed=True,
                 details=f"{len(observations)} network observations",
@@ -302,7 +302,7 @@ class NetworkUtilizationVerifier:
 
 @dataclass
 class CovertCapacityEstimator:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
     sram_per_gpu_bytes: int = 0
     num_gpus: int = 0
     excess_capacity_bytes: int = 0
@@ -317,7 +317,7 @@ class CovertCapacityEstimator:
             CovertCapacityEstimatedEvent(
                 event_id=runtime.make_event_id("covert-capacity"),
                 timestamp=runtime.now,
-                writer=Role.VERIFIER,
+                writer=Side.VERIFIER,
                 readers=VERIFICATION_READERS,
                 io_capacity_bits=0.0,
                 persistence_capacity_bytes=persistence,

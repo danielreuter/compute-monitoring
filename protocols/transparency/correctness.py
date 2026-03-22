@@ -12,11 +12,11 @@ from typing import Callable, ClassVar, Protocol
 from event_log import (
     Event,
     EventView,
-    Role,
+    Side,
     TRANSCRIPT_READERS,
     VERIFICATION_READERS,
 )
-from runtime.base import Participant
+from runtime.base import Role
 from runtime.engine import Runtime
 
 
@@ -116,12 +116,12 @@ class ReexecutionStrategy:
         return passed, details
 
 
-# --- Prover participant ---
+# --- Prover role ---
 
 
 @dataclass
 class CorrectnessProver:
-    writer: Role = field(default=Role.PROVER, init=False)
+    writer: Side = field(default=Side.PROVER, init=False)
 
     _pending: list[tuple[str, str, str, str, CorrectnessArtifactRef]] = field(
         default_factory=list, init=False, repr=False
@@ -164,7 +164,7 @@ class CorrectnessProver:
                 InferenceClaimedEvent(
                     event_id=runtime.make_event_id("inference-claimed"),
                     timestamp=runtime.now,
-                    writer=Role.PROVER,
+                    writer=Side.PROVER,
                     readers=TRANSCRIPT_READERS,
                     request_id=request_id,
                     model_id=model_id,
@@ -186,7 +186,7 @@ class CorrectnessProver:
             CorrectnessArtifactPublishedEvent(
                 event_id=runtime.make_event_id("artifact-published"),
                 timestamp=runtime.now,
-                writer=Role.PROVER,
+                writer=Side.PROVER,
                 readers=VERIFICATION_READERS,
                 session_id=event.session_id,
                 in_reply_to=event.event_id,
@@ -196,12 +196,12 @@ class CorrectnessProver:
         ]
 
 
-# --- Verifier participant ---
+# --- Verifier role ---
 
 
 @dataclass
 class CorrectnessVerifier:
-    writer: Role = field(default=Role.VERIFIER, init=False)
+    writer: Side = field(default=Side.VERIFIER, init=False)
     strategy: CorrectnessStrategy
     sample_fraction: float = 0.1
     timeout_ticks: float = 5.0
@@ -236,7 +236,7 @@ class CorrectnessVerifier:
                     CorrectnessCheckRequestedEvent(
                         event_id=runtime.make_event_id("correctness-check"),
                         timestamp=runtime.now,
-                        writer=Role.VERIFIER,
+                        writer=Side.VERIFIER,
                         readers=VERIFICATION_READERS,
                         session_id=session_id,
                         request_id=claim.request_id,
@@ -254,7 +254,7 @@ class CorrectnessVerifier:
                     CorrectnessCheckTimedOutEvent(
                         event_id=runtime.make_event_id("correctness-timeout"),
                         timestamp=runtime.now,
-                        writer=Role.VERIFIER,
+                        writer=Side.VERIFIER,
                         readers=VERIFICATION_READERS,
                         session_id=session_id,
                         request_id=request_id,
@@ -282,7 +282,7 @@ class CorrectnessVerifier:
             CorrectnessEvaluatedEvent(
                 event_id=runtime.make_event_id("correctness-evaluated"),
                 timestamp=runtime.now,
-                writer=Role.VERIFIER,
+                writer=Side.VERIFIER,
                 readers=VERIFICATION_READERS,
                 session_id=session_id,
                 request_id=request_id,

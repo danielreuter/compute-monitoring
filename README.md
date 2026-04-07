@@ -1,4 +1,4 @@
-# Vilnius — Confidential Compute Monitoring System Prototype
+# Confidential Compute Monitoring System Prototype
 
 This workspace now models CCM as an **append-only event log** plus a set of
 **protocols** that read the log and emit more events into it.

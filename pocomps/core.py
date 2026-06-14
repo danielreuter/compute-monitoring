@@ -39,9 +39,6 @@ INV-OUTPUT-COVERAGE:
 INV-INPUT-VALIDITY:
     Every task input hash is baseline-committed; sampled input hashes open.
 
-INV-TASK-LOCALITY:
-    A task's measurement ids are emitted by one site.
-
 INV-ENVIRONMENT-VALIDITY:
     Environment event blobs can be opened.
 
@@ -49,7 +46,10 @@ INV-RUN-COST:
     Predictor runs report nonnegative compute and entropy costs.
 
 INV-EPOCH-ERROR-ENTROPY:
-    Predictor runs consume at most the epoch error-entropy budget.
+    Sampled error advice consumes at most the epoch error-entropy budget.
+
+INV-SCHEDULER-ENTROPY:
+    Scheduler advice consumes at most the epoch scheduler-entropy budget.
 
 INV-TASK-COMPUTE:
     Task prediction consumes at most the task-prediction compute budget.
@@ -58,10 +58,13 @@ INV-REPLAY-COMPUTE:
     Sampled measurement prediction consumes at most the per-task compute budget.
 
 INV-REPLAY-ENTROPY:
-    Sampled measurement prediction consumes at most the per-task entropy budget.
+    Sampled task advice consumes at most the per-task entropy budget.
 
 INV-REPLAY-CORRECTNESS:
     Sampled measurement prediction reproduces the recorded output objects.
+
+INV-ADVICE-SHAPE:
+    Per-task advice tuples match the predicted task count.
 """
 
 from __future__ import annotations
@@ -85,6 +88,7 @@ EXTERNAL: SiteId = -1
 class PolicyParams:
     task_predictor_hash: Hash
     measurement_predictor_hash: Hash
+    scheduler_entropy_budget_per_epoch: int
     compute_budget_for_tasks: int
     compute_budget_per_task: int
     error_entropy_budget_per_epoch: int
@@ -106,6 +110,13 @@ class NetworkEvent:
     receiver: SiteId
     blob_hash: Hash
     blob_size: int
+
+
+@dataclass
+class Measurement:
+    sender: SiteId
+    receiver: SiteId
+    blob: Blob
 
 
 @dataclass
@@ -146,10 +157,10 @@ class RunResult(Generic[T]):
     entropy_cost: int = 0
 
 
-TaskPredictor = Callable[[NetworkEventLog, Advice], tuple[Task, ...]]
+TaskPredictor = Callable[[Advice], tuple[Task, ...]]
 MeasurementPredictor = Callable[
-    [Task, tuple[Blob, ...], Advice],
-    tuple[Blob, ...],
+    [Task, tuple[Blob, ...], Advice, Advice, Advice],
+    tuple[Measurement, ...],
 ]
 
 
@@ -169,11 +180,11 @@ def predict_tasks(
     storage: Storage,
     baseline: Baseline,
     params: PolicyParams,
-    advice: Advice,
+    scheduler_advice: Advice,
     predictor: TaskPredictor,
 ) -> RunResult[tuple[Task, ...]]:
     assert baseline.contains(params.task_predictor_hash), "INV-PREDICTOR-COMMITMENT"
-    result = run_with_accounting(lambda: predictor(event_log, advice), advice)
+    result = run_with_accounting(lambda: predictor(scheduler_advice), scheduler_advice)
 
     tasks = result.value  # TODO: fix this type
     assert isinstance(tasks, tuple), "INV-PREDICTOR-OUTPUT-TYPE"
@@ -194,7 +205,6 @@ def predict_tasks(
         assert task.measurement_ids, "INV-OUTPUT-VALIDITY"
         assert is_strictly_increasing(task.measurement_ids), "INV-OUTPUT-VALIDITY"
 
-        output_senders: set[SiteId] = set()
         for measurement_id in task.measurement_ids:
             assert 0 <= measurement_id < event_count, "INV-OUTPUT-VALIDITY"
             event = event_log.events[measurement_id]
@@ -202,10 +212,7 @@ def predict_tasks(
             assert measurement_id not in covered_measurement_ids, (
                 "INV-OUTPUT-OWNERSHIP"
             )
-            output_senders.add(event.sender)
             covered_measurement_ids.add(measurement_id)
-
-        assert len(output_senders) == 1, "INV-TASK-LOCALITY"
 
     monitored_outputs = {
         event_id
@@ -236,9 +243,11 @@ def predict_measurements(
     storage: Storage,
     baseline: Baseline,
     params: PolicyParams,
-    advice: Advice,
+    scheduler_advice: Advice,
+    task_advice: Advice,
+    error_advice: Advice,
     predictor: MeasurementPredictor,
-) -> RunResult[tuple[Blob, ...]]:
+) -> RunResult[tuple[Measurement, ...]]:
     assert baseline.contains(params.measurement_predictor_hash), (
         "INV-PREDICTOR-COMMITMENT"
     )
@@ -246,10 +255,22 @@ def predict_measurements(
         assert baseline.contains(input_hash), "INV-INPUT-VALIDITY"
         assert input_hash in storage.blobs, "INV-INPUT-VALIDITY"
     inputs = storage.read_many(task.input_hashes)
-    result = run_with_accounting(lambda: predictor(task, inputs, advice), advice)
+    result = run_with_accounting(
+        lambda: predictor(
+            task,
+            inputs,
+            scheduler_advice,
+            task_advice,
+            error_advice,
+        ),
+        "",
+    )
 
     measurements = result.value
     assert isinstance(measurements, tuple), "INV-PREDICTOR-OUTPUT-TYPE"
+    assert all(isinstance(measurement, Measurement) for measurement in measurements), (
+        "INV-PREDICTOR-OUTPUT-TYPE"
+    )
 
     assert len(measurements) == len(task.measurement_ids), (
         "INV-REPLAY-CORRECTNESS"
@@ -259,16 +280,19 @@ def predict_measurements(
         measurements,
     ):
         event = event_log.events[measurement_id]
-        assert hash(measurement) == event.blob_hash, "INV-REPLAY-CORRECTNESS"
-        assert object_size(measurement) == event.blob_size, (
+        assert measurement.sender == event.sender, "INV-REPLAY-CORRECTNESS"
+        assert measurement.receiver == event.receiver, "INV-REPLAY-CORRECTNESS"
+        assert hash(measurement.blob) == event.blob_hash, "INV-REPLAY-CORRECTNESS"
+        assert object_size(measurement.blob) == event.blob_size, (
             "INV-REPLAY-CORRECTNESS"
         )
 
     return RunResult(
         value=measurements,
         compute_cost=result.compute_cost,
-        entropy_cost=result.entropy_cost,
+        entropy_cost=len(error_advice),
     )
+
 
 def object_size(blob: Blob) -> int:
     try:
@@ -309,8 +333,9 @@ def audit_epoch(
     baseline: Baseline,
     params: PolicyParams,
     beacon: bytes,
-    task_advice: Advice,
-    measurement_advice: Advice,
+    scheduler_advice: Advice,
+    task_advice: tuple[Advice, ...],
+    error_advice: tuple[Advice, ...],
     task_predictor: TaskPredictor,
     measurement_predictor: MeasurementPredictor,
 ) -> tuple[Task, ...]:
@@ -321,32 +346,42 @@ def audit_epoch(
         storage,
         baseline,
         params,
-        task_advice,
+        scheduler_advice,
         task_predictor,
     )
 
     tasks = task_result.value
+    assert len(task_advice) == len(tasks), "INV-ADVICE-SHAPE"
+    assert len(error_advice) == len(tasks), "INV-ADVICE-SHAPE"
 
     # verify budget compliance
     assert task_result.compute_cost >= 0, "INV-RUN-COST"
     assert task_result.entropy_cost >= 0, "INV-RUN-COST"
+    assert task_result.entropy_cost <= params.scheduler_entropy_budget_per_epoch, (
+        "INV-SCHEDULER-ENTROPY"
+    )
     assert task_result.compute_cost <= params.compute_budget_for_tasks, (
         "INV-TASK-COMPUTE"
     )
 
     # sample tasks to verify
     sample = sample_by_weight(
-        tasks,
-        lambda task: sum(
-            event_log.events[i].blob_size for i in task.measurement_ids
+        tuple(enumerate(tasks)),
+        lambda indexed_task: sum(
+            event_log.events[i].blob_size for i in indexed_task[1].measurement_ids
         ),
         params.sample_rate_per_output_byte,
         beacon,
     )
 
     # verify sampled tasks
-    run_results: list[RunResult[object]] = [task_result]
-    for task in sample:
+    run_results: list[RunResult[object]] = []
+    for task_index, task in sample:
+        task_entropy_cost = len(task_advice[task_index])
+        assert task_entropy_cost >= 0, "INV-RUN-COST"
+        assert task_entropy_cost <= params.entropy_budget_per_task, (
+            "INV-REPLAY-ENTROPY"
+        )
 
         # run measurement predictor
         measurement_result = predict_measurements(
@@ -355,7 +390,9 @@ def audit_epoch(
             storage,
             baseline,
             params,
-            measurement_advice,
+            scheduler_advice,
+            task_advice[task_index],
+            error_advice[task_index],
             measurement_predictor,
         )
 
@@ -364,9 +401,6 @@ def audit_epoch(
         assert measurement_result.entropy_cost >= 0, "INV-RUN-COST"
         assert measurement_result.compute_cost <= params.compute_budget_per_task, (
             "INV-REPLAY-COMPUTE"
-        )
-        assert measurement_result.entropy_cost <= params.entropy_budget_per_task, (
-            "INV-REPLAY-ENTROPY"
         )
         run_results.append(measurement_result)
 

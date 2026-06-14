@@ -2,6 +2,7 @@ import unittest
 
 from pocomps import (
     Baseline,
+    Measurement,
     Task,
     NetworkEvent,
     NetworkEventLog,
@@ -21,6 +22,7 @@ def make_params(
     *,
     task_predictor_hash: int = TASK_PREDICTOR_HASH,
     measurement_predictor_hash: int = MEASUREMENT_PREDICTOR_HASH,
+    scheduler_entropy_budget_per_epoch: int = 10,
     compute_budget_for_tasks: int = 10,
     compute_budget_per_task: int = 10,
     error_entropy_budget_per_epoch: int = 10,
@@ -30,6 +32,7 @@ def make_params(
     return PolicyParams(
         task_predictor_hash=task_predictor_hash,
         measurement_predictor_hash=measurement_predictor_hash,
+        scheduler_entropy_budget_per_epoch=scheduler_entropy_budget_per_epoch,
         compute_budget_for_tasks=compute_budget_for_tasks,
         compute_budget_per_task=compute_budget_per_task,
         error_entropy_budget_per_epoch=error_entropy_budget_per_epoch,
@@ -38,15 +41,17 @@ def make_params(
     )
 
 
-def no_tasks(_event_log: NetworkEventLog, _advice: str) -> tuple[Task, ...]:
+def no_tasks(_scheduler_advice: str) -> tuple[Task, ...]:
     return ()
 
 
 def no_measurements(
     _task: Task,
     _inputs: tuple[object, ...],
-    _advice: str,
-) -> tuple[object, ...]:
+    _scheduler_advice: str,
+    _task_advice: str,
+    _error_advice: str,
+) -> tuple[Measurement, ...]:
     return ()
 
 
@@ -58,8 +63,7 @@ class PocompTasksTest(unittest.TestCase):
 
     def test_rejects_invalid_output_event_id_before_lookup(self) -> None:
         def task_predictor(
-            _event_log: NetworkEventLog,
-            _advice: str,
+            _scheduler_advice: str,
         ) -> tuple[Task, ...]:
             return (Task(input_hashes=(), measurement_ids=(1,)),)
 
@@ -78,8 +82,7 @@ class PocompTasksTest(unittest.TestCase):
 
     def test_rejects_uncommitted_task_predictor_hash(self) -> None:
         def should_not_run(
-            _event_log: NetworkEventLog,
-            _advice: str,
+            _scheduler_advice: str,
         ) -> tuple[Task, ...]:
             raise AssertionError("predictor should not run")
 
@@ -112,8 +115,7 @@ class PocompTasksTest(unittest.TestCase):
         output_blob = b"output"
 
         def task_predictor(
-            _event_log: NetworkEventLog,
-            _advice: str,
+            _scheduler_advice: str,
         ) -> tuple[Task, ...]:
             return (Task(input_hashes=(hash(input_blob),), measurement_ids=(0,)),)
 
@@ -138,23 +140,24 @@ class PocompTasksTest(unittest.TestCase):
                 task_predictor,
             )
 
-    def test_task_prediction_draws_from_epoch_error_entropy_budget(self) -> None:
-        params = make_params(error_entropy_budget_per_epoch=2)
+    def test_task_prediction_draws_from_scheduler_entropy_budget(self) -> None:
+        params = make_params(scheduler_entropy_budget_per_epoch=2)
 
-        with self.assertRaisesRegex(AssertionError, "INV-EPOCH-ERROR-ENTROPY"):
+        with self.assertRaisesRegex(AssertionError, "INV-SCHEDULER-ENTROPY"):
             audit_epoch(
                 NetworkEventLog(()),
                 self.storage,
                 Baseline({TASK_PREDICTOR_HASH}),
                 params,
                 beacon=b"public randomness",
-                task_advice="101",
-                measurement_advice="",
+                scheduler_advice="101",
+                task_advice=(),
+                error_advice=(),
                 task_predictor=no_tasks,
                 measurement_predictor=no_measurements,
             )
 
-    def test_rejects_measurement_prediction_over_task_entropy_budget(self) -> None:
+    def test_rejects_task_advice_over_task_entropy_budget(self) -> None:
         input_blob = b"input"
         output_blob = b"output"
         storage = Storage({hash(input_blob): input_blob})
@@ -180,20 +183,20 @@ class PocompTasksTest(unittest.TestCase):
         )
 
         def task_predictor(
-            event_log: NetworkEventLog,
-            _advice: str,
+            _scheduler_advice: str,
         ) -> tuple[Task, ...]:
-            input_event, _output_event = event_log.events
             return (
-                Task(input_hashes=(input_event.blob_hash,), measurement_ids=(1,)),
+                Task(input_hashes=(hash(input_blob),), measurement_ids=(1,)),
             )
 
         def measurement_predictor(
             _task: Task,
             _inputs: tuple[object, ...],
-            _advice: str,
-        ) -> tuple[object, ...]:
-            return (output_blob,)
+            _scheduler_advice: str,
+            _task_advice: str,
+            _error_advice: str,
+        ) -> tuple[Measurement, ...]:
+            return (Measurement(sender=1, receiver=2, blob=output_blob),)
 
         with self.assertRaisesRegex(AssertionError, "INV-REPLAY-ENTROPY"):
             audit_epoch(
@@ -208,8 +211,52 @@ class PocompTasksTest(unittest.TestCase):
                 ),
                 params,
                 beacon=b"public randomness",
-                task_advice="",
-                measurement_advice="10",
+                scheduler_advice="",
+                task_advice=("10",),
+                error_advice=("",),
+                task_predictor=task_predictor,
+                measurement_predictor=measurement_predictor,
+            )
+
+    def test_rejects_error_advice_over_epoch_error_entropy_budget(self) -> None:
+        output_blob = b"output"
+        event_log = NetworkEventLog(
+            (
+                NetworkEvent(
+                    sender=1,
+                    receiver=2,
+                    blob_hash=hash(output_blob),
+                    blob_size=len(output_blob),
+                ),
+            )
+        )
+        params = make_params(
+            error_entropy_budget_per_epoch=2,
+            sample_rate_per_output_byte=1.0,
+        )
+
+        def task_predictor(_scheduler_advice: str) -> tuple[Task, ...]:
+            return (Task(input_hashes=(), measurement_ids=(0,)),)
+
+        def measurement_predictor(
+            _task: Task,
+            _inputs: tuple[object, ...],
+            _scheduler_advice: str,
+            _task_advice: str,
+            _error_advice: str,
+        ) -> tuple[Measurement, ...]:
+            return (Measurement(sender=1, receiver=2, blob=output_blob),)
+
+        with self.assertRaisesRegex(AssertionError, "INV-EPOCH-ERROR-ENTROPY"):
+            audit_epoch(
+                event_log,
+                self.storage,
+                Baseline({TASK_PREDICTOR_HASH, MEASUREMENT_PREDICTOR_HASH}),
+                params,
+                beacon=b"public randomness",
+                scheduler_advice="",
+                task_advice=("",),
+                error_advice=("101",),
                 task_predictor=task_predictor,
                 measurement_predictor=measurement_predictor,
             )
@@ -231,9 +278,11 @@ class PocompTasksTest(unittest.TestCase):
         def measurement_predictor(
             _task: Task,
             inputs: tuple[object, ...],
-            _advice: str,
-        ) -> tuple[object, ...]:
-            return inputs
+            _scheduler_advice: str,
+            _task_advice: str,
+            _error_advice: str,
+        ) -> tuple[Measurement, ...]:
+            return (Measurement(sender=1, receiver=2, blob=inputs[0]),)
 
         measurements_result = predict_measurements(
             Task(input_hashes=(hash(input_blob),), measurement_ids=(0,)),
@@ -242,10 +291,15 @@ class PocompTasksTest(unittest.TestCase):
             Baseline({MEASUREMENT_PREDICTOR_HASH, hash(input_blob)}),
             self.params,
             "",
+            "",
+            "",
             measurement_predictor,
         )
 
-        self.assertEqual(measurements_result.value, (input_blob,))
+        self.assertEqual(
+            measurements_result.value,
+            (Measurement(sender=1, receiver=2, blob=input_blob),),
+        )
         self.assertGreaterEqual(measurements_result.compute_cost, 0)
 
     def test_rejects_uncommitted_task_input_hash(self) -> None:
@@ -269,6 +323,8 @@ class PocompTasksTest(unittest.TestCase):
                 storage,
                 Baseline({MEASUREMENT_PREDICTOR_HASH}),
                 self.params,
+                "",
+                "",
                 "",
                 no_measurements,
             )
@@ -294,13 +350,14 @@ class PocompTasksTest(unittest.TestCase):
                 Baseline({MEASUREMENT_PREDICTOR_HASH, missing_input_hash}),
                 self.params,
                 "",
+                "",
+                "",
                 no_measurements,
             )
 
     def test_rejects_duplicate_output_event_ids(self) -> None:
         def task_predictor(
-            _event_log: NetworkEventLog,
-            _advice: str,
+            _scheduler_advice: str,
         ) -> tuple[Task, ...]:
             return (
                 Task(input_hashes=(), measurement_ids=(0,)),

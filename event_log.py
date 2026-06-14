@@ -16,6 +16,9 @@ class Side(Enum):
     VERIFYING_PARTY = "verifying_party"
 
 
+Role = Side
+
+
 class EventView(Enum):
     TRANSCRIPT = "transcript"
     VERIFICATION = "verification"

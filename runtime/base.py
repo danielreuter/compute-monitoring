@@ -17,3 +17,6 @@ class Role(Protocol):
 
     def on_event(self, event: Event, runtime: Runtime) -> list[Event]: ...
     def on_tick(self, runtime: Runtime) -> list[Event]: ...
+
+
+Participant = Role

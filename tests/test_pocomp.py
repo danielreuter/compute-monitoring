@@ -1,380 +1,311 @@
 import unittest
 
 from pocomps import (
+    AuditResult,
     Baseline,
     Measurement,
-    Task,
-    NetworkEvent,
-    NetworkEventLog,
     PolicyParams,
     Storage,
     audit_epoch,
-    predict_tasks,
-    predict_measurements,
+    predict_metadata,
+    predict_payload,
 )
 
 
-TASK_PREDICTOR_HASH = hash(b"task-predictor")
-MEASUREMENT_PREDICTOR_HASH = hash(b"measurement-predictor")
+METADATA_PREDICTOR_HASH = hash(b"metadata-predictor")
+PAYLOAD_PREDICTOR_HASH = hash(b"payload-predictor")
 
 
 def make_params(
     *,
-    task_predictor_hash: int = TASK_PREDICTOR_HASH,
-    measurement_predictor_hash: int = MEASUREMENT_PREDICTOR_HASH,
-    scheduler_entropy_budget_per_epoch: int = 10,
-    compute_budget_for_tasks: int = 10,
-    compute_budget_per_task: int = 10,
-    error_entropy_budget_per_epoch: int = 10,
-    entropy_budget_per_task: int = 10,
-    sample_rate_per_output_byte: float = 0,
+    metadata_predictor_hash: int = METADATA_PREDICTOR_HASH,
+    payload_predictor_hash: int = PAYLOAD_PREDICTOR_HASH,
+    metadata_entropy_budget_per_epoch: int = 10,
+    compute_budget_for_metadata: int = 10,
+    entropy_budget_per_payload: int = 10,
+    compute_budget_per_payload: int = 10,
+    sample_rate_per_measurement: float = 1.0,
 ) -> PolicyParams:
     return PolicyParams(
-        task_predictor_hash=task_predictor_hash,
-        measurement_predictor_hash=measurement_predictor_hash,
-        scheduler_entropy_budget_per_epoch=scheduler_entropy_budget_per_epoch,
-        compute_budget_for_tasks=compute_budget_for_tasks,
-        compute_budget_per_task=compute_budget_per_task,
-        error_entropy_budget_per_epoch=error_entropy_budget_per_epoch,
-        entropy_budget_per_task=entropy_budget_per_task,
-        sample_rate_per_output_byte=sample_rate_per_output_byte,
+        metadata_predictor_hash=metadata_predictor_hash,
+        payload_predictor_hash=payload_predictor_hash,
+        metadata_entropy_budget_per_epoch=metadata_entropy_budget_per_epoch,
+        compute_budget_for_metadata=compute_budget_for_metadata,
+        entropy_budget_per_payload=entropy_budget_per_payload,
+        compute_budget_per_payload=compute_budget_per_payload,
+        sample_rate_per_measurement=sample_rate_per_measurement,
     )
 
 
-def no_tasks(_scheduler_advice: str) -> tuple[Task, ...]:
-    return ()
+def make_measurements(*objects: object) -> tuple[Measurement, ...]:
+    return tuple(
+        Measurement(metadata=("measurement", measurement_id), payload=hash(payload))
+        for measurement_id, payload in enumerate(objects)
+    )
 
 
-def no_measurements(
-    _task: Task,
-    _inputs: tuple[object, ...],
-    _scheduler_advice: str,
-    _task_advice: str,
-    _error_advice: str,
-) -> tuple[Measurement, ...]:
-    return ()
+def make_storage(*objects: object) -> Storage:
+    return Storage({hash(payload): payload for payload in objects})
 
 
-class PocompTasksTest(unittest.TestCase):
+def committed_baseline() -> Baseline:
+    return Baseline({METADATA_PREDICTOR_HASH, PAYLOAD_PREDICTOR_HASH})
+
+
+class PocompTest(unittest.TestCase):
     def setUp(self) -> None:
         self.params = make_params()
-        self.baseline = Baseline(set())
-        self.storage = Storage({})
+        self.objects = (b"alpha", b"bravo")
+        self.measurements = make_measurements(*self.objects)
+        self.storage = make_storage(*self.objects)
 
-    def test_rejects_invalid_output_event_id_before_lookup(self) -> None:
-        def task_predictor(
-            _scheduler_advice: str,
-        ) -> tuple[Task, ...]:
-            return (Task(input_hashes=(), measurement_ids=(1,)),)
+    def test_predict_metadata_wraps_callable_result_and_costs(self) -> None:
+        result = predict_metadata(
+            committed_baseline(),
+            self.params,
+            "abc",
+            lambda _advice: tuple(
+                measurement.metadata for measurement in self.measurements
+            ),
+        )
 
-        output = NetworkEvent(sender=1, receiver=2, blob_hash=101, blob_size=1)
-        event_log = NetworkEventLog((output,))
+        self.assertEqual(
+            result.value,
+            tuple(measurement.metadata for measurement in self.measurements),
+        )
+        self.assertGreaterEqual(result.compute_cost, 0)
+        self.assertEqual(result.entropy_cost, 3)
 
-        with self.assertRaisesRegex(AssertionError, "INV-OUTPUT-VALIDITY"):
-            predict_tasks(
-                event_log,
-                self.storage,
-                Baseline({TASK_PREDICTOR_HASH}),
-                self.params,
-                "",
-                task_predictor,
-            )
-
-    def test_rejects_uncommitted_task_predictor_hash(self) -> None:
-        def should_not_run(
-            _scheduler_advice: str,
-        ) -> tuple[Task, ...]:
+    def test_rejects_uncommitted_metadata_predictor_hash(self) -> None:
+        def should_not_run(_metadata_advice: str) -> tuple[object, ...]:
             raise AssertionError("predictor should not run")
 
         with self.assertRaisesRegex(AssertionError, "INV-PREDICTOR-COMMITMENT"):
-            predict_tasks(
-                NetworkEventLog(()),
-                self.storage,
-                self.baseline,
+            predict_metadata(
+                Baseline(set()),
                 self.params,
                 "",
                 should_not_run,
             )
 
-    def test_predict_tasks_wraps_callable_result_and_costs(self) -> None:
-        tasks_result = predict_tasks(
-            NetworkEventLog(()),
+    def test_rejects_non_tuple_metadata_prediction(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "INV-PREDICTOR-OUTPUT-TYPE"):
+            predict_metadata(
+                committed_baseline(),
+                self.params,
+                "",
+                lambda _advice: list(
+                    measurement.metadata for measurement in self.measurements
+                ),  # type: ignore[return-value]
+            )
+
+    def test_rejects_metadata_mismatch(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "INV-METADATA-CORRECTNESS"):
+            audit_epoch(
+                self.measurements,
+                self.storage,
+                committed_baseline(),
+                self.params,
+                beacon=b"public randomness",
+                metadata_advice="",
+                payload_advice=("", ""),
+                predict_measurement_metadata=lambda _advice: (("wrong", 0),),
+                predict_measurement_payload=lambda *_args: b"unused",
+            )
+
+    def test_predict_payload_wraps_one_measurement_result_and_costs(self) -> None:
+        prediction = predict_payload(
+            committed_baseline(),
+            self.params,
+            1,
+            self.measurements[1].metadata,
+            "metadata",
+            "payload",
+            lambda measurement_id, _metadata, _metadata_advice, _payload_advice: (
+                self.objects[measurement_id]
+            ),
+        )
+
+        self.assertEqual(prediction.value, self.objects[1])
+        self.assertGreaterEqual(prediction.compute_cost, 0)
+        self.assertEqual(prediction.entropy_cost, len("payload"))
+
+    def test_predict_payload_returns_predicted_object(self) -> None:
+        prediction = predict_payload(
+            committed_baseline(),
+            self.params,
+            1,
+            self.measurements[1].metadata,
+            "metadata",
+            "payload",
+            lambda *_args: b"wrong",
+        )
+
+        self.assertEqual(prediction.value, b"wrong")
+        self.assertGreaterEqual(prediction.compute_cost, 0)
+        self.assertEqual(prediction.entropy_cost, len("payload"))
+
+    def test_rejects_uncommitted_payload_predictor_hash(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "INV-PREDICTOR-COMMITMENT"):
+            predict_payload(
+                Baseline({METADATA_PREDICTOR_HASH}),
+                self.params,
+                0,
+                self.measurements[0].metadata,
+                "",
+                "",
+                lambda *_args: b"unused",
+            )
+
+    def test_rejects_payload_mismatch(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "INV-REPLAY-CORRECTNESS"):
+            audit_epoch(
+                self.measurements,
+                self.storage,
+                committed_baseline(),
+                self.params,
+                beacon=b"public randomness",
+                metadata_advice="",
+                payload_advice=("", ""),
+                predict_measurement_metadata=lambda _advice: tuple(
+                    measurement.metadata for measurement in self.measurements
+                ),
+                predict_measurement_payload=lambda *_args: b"wrong",
+            )
+
+    def test_audit_accounts_each_sampled_payload_prediction(self) -> None:
+        result = audit_epoch(
+            self.measurements,
             self.storage,
-            Baseline({TASK_PREDICTOR_HASH}),
+            committed_baseline(),
             self.params,
-            "101",
-            no_tasks,
+            beacon=b"public randomness",
+            metadata_advice="abc",
+            payload_advice=("x", "yz"),
+            predict_measurement_metadata=lambda _advice: tuple(
+                measurement.metadata for measurement in self.measurements
+            ),
+            predict_measurement_payload=lambda measurement_id, *_args: self.objects[
+                measurement_id
+            ],
         )
 
-        self.assertEqual(tasks_result.value, ())
-        self.assertGreaterEqual(tasks_result.compute_cost, 0)
-        self.assertEqual(tasks_result.entropy_cost, 3)
-
-    def test_predict_tasks_rejects_uncommitted_task_input_hash(self) -> None:
-        input_blob = b"input"
-        output_blob = b"output"
-
-        def task_predictor(
-            _scheduler_advice: str,
-        ) -> tuple[Task, ...]:
-            return (Task(input_hashes=(hash(input_blob),), measurement_ids=(0,)),)
-
-        event_log = NetworkEventLog(
-            (
-                NetworkEvent(
-                    sender=1,
-                    receiver=2,
-                    blob_hash=hash(output_blob),
-                    blob_size=len(output_blob),
-                ),
-            )
-        )
-
-        with self.assertRaisesRegex(AssertionError, "INV-INPUT-VALIDITY"):
-            predict_tasks(
-                event_log,
-                self.storage,
-                Baseline({TASK_PREDICTOR_HASH}),
-                self.params,
-                "",
-                task_predictor,
-            )
-
-    def test_task_prediction_draws_from_scheduler_entropy_budget(self) -> None:
-        params = make_params(scheduler_entropy_budget_per_epoch=2)
-
-        with self.assertRaisesRegex(AssertionError, "INV-SCHEDULER-ENTROPY"):
-            audit_epoch(
-                NetworkEventLog(()),
-                self.storage,
-                Baseline({TASK_PREDICTOR_HASH}),
-                params,
-                beacon=b"public randomness",
-                scheduler_advice="101",
-                task_advice=(),
-                error_advice=(),
-                task_predictor=no_tasks,
-                measurement_predictor=no_measurements,
-            )
-
-    def test_rejects_task_advice_over_task_entropy_budget(self) -> None:
-        input_blob = b"input"
-        output_blob = b"output"
-        storage = Storage({hash(input_blob): input_blob})
-        event_log = NetworkEventLog(
-            (
-                NetworkEvent(
-                    sender=-1,
-                    receiver=1,
-                    blob_hash=hash(input_blob),
-                    blob_size=len(input_blob),
-                ),
-                NetworkEvent(
-                    sender=1,
-                    receiver=2,
-                    blob_hash=hash(output_blob),
-                    blob_size=len(output_blob),
-                ),
-            )
-        )
-        params = make_params(
-            entropy_budget_per_task=1,
-            sample_rate_per_output_byte=1.0,
-        )
-
-        def task_predictor(
-            _scheduler_advice: str,
-        ) -> tuple[Task, ...]:
-            return (
-                Task(input_hashes=(hash(input_blob),), measurement_ids=(1,)),
-            )
-
-        def measurement_predictor(
-            _task: Task,
-            _inputs: tuple[object, ...],
-            _scheduler_advice: str,
-            _task_advice: str,
-            _error_advice: str,
-        ) -> tuple[Measurement, ...]:
-            return (Measurement(sender=1, receiver=2, blob=output_blob),)
-
-        with self.assertRaisesRegex(AssertionError, "INV-REPLAY-ENTROPY"):
-            audit_epoch(
-                event_log,
-                storage,
-                Baseline(
-                    {
-                        TASK_PREDICTOR_HASH,
-                        MEASUREMENT_PREDICTOR_HASH,
-                        hash(input_blob),
-                    }
-                ),
-                params,
-                beacon=b"public randomness",
-                scheduler_advice="",
-                task_advice=("10",),
-                error_advice=("",),
-                task_predictor=task_predictor,
-                measurement_predictor=measurement_predictor,
-            )
-
-    def test_rejects_error_advice_over_epoch_error_entropy_budget(self) -> None:
-        output_blob = b"output"
-        event_log = NetworkEventLog(
-            (
-                NetworkEvent(
-                    sender=1,
-                    receiver=2,
-                    blob_hash=hash(output_blob),
-                    blob_size=len(output_blob),
-                ),
-            )
-        )
-        params = make_params(
-            error_entropy_budget_per_epoch=2,
-            sample_rate_per_output_byte=1.0,
-        )
-
-        def task_predictor(_scheduler_advice: str) -> tuple[Task, ...]:
-            return (Task(input_hashes=(), measurement_ids=(0,)),)
-
-        def measurement_predictor(
-            _task: Task,
-            _inputs: tuple[object, ...],
-            _scheduler_advice: str,
-            _task_advice: str,
-            _error_advice: str,
-        ) -> tuple[Measurement, ...]:
-            return (Measurement(sender=1, receiver=2, blob=output_blob),)
-
-        with self.assertRaisesRegex(AssertionError, "INV-EPOCH-ERROR-ENTROPY"):
-            audit_epoch(
-                event_log,
-                self.storage,
-                Baseline({TASK_PREDICTOR_HASH, MEASUREMENT_PREDICTOR_HASH}),
-                params,
-                beacon=b"public randomness",
-                scheduler_advice="",
-                task_advice=("",),
-                error_advice=("101",),
-                task_predictor=task_predictor,
-                measurement_predictor=measurement_predictor,
-            )
-
-    def test_predict_measurements_opens_task_input_hashes(self) -> None:
-        input_blob = b"input"
-        event_log = NetworkEventLog(
-            (
-                NetworkEvent(
-                    sender=1,
-                    receiver=2,
-                    blob_hash=hash(input_blob),
-                    blob_size=len(input_blob),
-                ),
-            )
-        )
-        storage = Storage({hash(input_blob): input_blob})
-
-        def measurement_predictor(
-            _task: Task,
-            inputs: tuple[object, ...],
-            _scheduler_advice: str,
-            _task_advice: str,
-            _error_advice: str,
-        ) -> tuple[Measurement, ...]:
-            return (Measurement(sender=1, receiver=2, blob=inputs[0]),)
-
-        measurements_result = predict_measurements(
-            Task(input_hashes=(hash(input_blob),), measurement_ids=(0,)),
-            event_log,
-            storage,
-            Baseline({MEASUREMENT_PREDICTOR_HASH, hash(input_blob)}),
-            self.params,
-            "",
-            "",
-            "",
-            measurement_predictor,
-        )
-
+        self.assertIsInstance(result, AuditResult)
         self.assertEqual(
-            measurements_result.value,
-            (Measurement(sender=1, receiver=2, blob=input_blob),),
+            result.metadata_prediction.value,
+            tuple(measurement.metadata for measurement in self.measurements),
         )
-        self.assertGreaterEqual(measurements_result.compute_cost, 0)
-
-    def test_rejects_uncommitted_task_input_hash(self) -> None:
-        input_blob = b"input"
-        event_log = NetworkEventLog(
-            (
-                NetworkEvent(
-                    sender=1,
-                    receiver=2,
-                    blob_hash=hash(input_blob),
-                    blob_size=len(input_blob),
-                ),
-            )
+        self.assertEqual(result.metadata_prediction.entropy_cost, 3)
+        self.assertGreaterEqual(result.metadata_prediction.compute_cost, 0)
+        self.assertEqual(
+            list(result.sampled_measurement_ids),
+            [0, 1],
         )
-        storage = Storage({hash(input_blob): input_blob})
-
-        with self.assertRaisesRegex(AssertionError, "INV-INPUT-VALIDITY"):
-            predict_measurements(
-                Task(input_hashes=(hash(input_blob),), measurement_ids=(0,)),
-                event_log,
-                storage,
-                Baseline({MEASUREMENT_PREDICTOR_HASH}),
-                self.params,
-                "",
-                "",
-                "",
-                no_measurements,
-            )
-
-    def test_rejects_missing_input_hash(self) -> None:
-        missing_input_hash = hash(b"missing")
-        event_log = NetworkEventLog(
-            (
-                NetworkEvent(
-                    sender=1,
-                    receiver=2,
-                    blob_hash=missing_input_hash,
-                    blob_size=7,
-                ),
+        self.assertEqual(
+            [prediction.value for prediction in result.payload_predictions],
+            list(self.objects),
+        )
+        self.assertEqual(
+            [prediction.entropy_cost for prediction in result.payload_predictions],
+            [1, 2],
+        )
+        self.assertTrue(
+            all(
+                prediction.compute_cost >= 0
+                for prediction in result.payload_predictions
             )
         )
 
-        with self.assertRaisesRegex(AssertionError, "INV-INPUT-VALIDITY"):
-            predict_measurements(
-                Task(input_hashes=(missing_input_hash,), measurement_ids=(0,)),
-                event_log,
+    def test_rejects_metadata_advice_over_budget(self) -> None:
+        params = make_params(metadata_entropy_budget_per_epoch=2)
+
+        with self.assertRaisesRegex(AssertionError, "INV-METADATA-ENTROPY"):
+            audit_epoch(
+                self.measurements,
                 self.storage,
-                Baseline({MEASUREMENT_PREDICTOR_HASH, missing_input_hash}),
-                self.params,
-                "",
-                "",
-                "",
-                no_measurements,
+                committed_baseline(),
+                params,
+                beacon=b"public randomness",
+                metadata_advice="abc",
+                payload_advice=("", ""),
+                predict_measurement_metadata=lambda _advice: tuple(
+                    measurement.metadata for measurement in self.measurements
+                ),
+                predict_measurement_payload=lambda measurement_id, *_args: self.objects[
+                    measurement_id
+                ],
             )
 
-    def test_rejects_duplicate_output_event_ids(self) -> None:
-        def task_predictor(
-            _scheduler_advice: str,
-        ) -> tuple[Task, ...]:
-            return (
-                Task(input_hashes=(), measurement_ids=(0,)),
-                Task(input_hashes=(), measurement_ids=(0,)),
-            )
+    def test_rejects_payload_advice_over_budget(self) -> None:
+        params = make_params(entropy_budget_per_payload=1)
 
-        output = NetworkEvent(sender=1, receiver=2, blob_hash=101, blob_size=1)
-        event_log = NetworkEventLog((output,))
-
-        with self.assertRaisesRegex(AssertionError, "INV-OUTPUT-OWNERSHIP"):
-            predict_tasks(
-                event_log,
+        with self.assertRaisesRegex(AssertionError, "INV-PAYLOAD-ENTROPY"):
+            audit_epoch(
+                self.measurements,
                 self.storage,
-                Baseline({TASK_PREDICTOR_HASH}),
+                committed_baseline(),
+                params,
+                beacon=b"public randomness",
+                metadata_advice="",
+                payload_advice=("", "yz"),
+                predict_measurement_metadata=lambda _advice: tuple(
+                    measurement.metadata for measurement in self.measurements
+                ),
+                predict_measurement_payload=lambda measurement_id, *_args: self.objects[
+                    measurement_id
+                ],
+            )
+
+    def test_rejects_payload_advice_shape_mismatch(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "INV-ADVICE-SHAPE"):
+            audit_epoch(
+                self.measurements,
+                self.storage,
+                committed_baseline(),
                 self.params,
-                "",
-                task_predictor,
+                beacon=b"public randomness",
+                metadata_advice="",
+                payload_advice=("",),
+                predict_measurement_metadata=lambda _advice: tuple(
+                    measurement.metadata for measurement in self.measurements
+                ),
+                predict_measurement_payload=lambda measurement_id, *_args: self.objects[
+                    measurement_id
+                ],
+            )
+
+    def test_rejects_bad_sample_rate(self) -> None:
+        params = make_params(sample_rate_per_measurement=1.1)
+
+        with self.assertRaisesRegex(AssertionError, "INV-POLICY-PARAMS"):
+            audit_epoch(
+                self.measurements,
+                self.storage,
+                committed_baseline(),
+                params,
+                beacon=b"public randomness",
+                metadata_advice="",
+                payload_advice=("", ""),
+                predict_measurement_metadata=lambda _advice: (),
+                predict_measurement_payload=lambda *_args: b"unused",
+            )
+
+    def test_rejects_missing_observed_payload_opening(self) -> None:
+        with self.assertRaisesRegex(AssertionError, "INV-OBJECT-OPENING"):
+            audit_epoch(
+                self.measurements,
+                Storage({}),
+                committed_baseline(),
+                self.params,
+                beacon=b"public randomness",
+                metadata_advice="",
+                payload_advice=("", ""),
+                predict_measurement_metadata=lambda _advice: tuple(
+                    measurement.metadata for measurement in self.measurements
+                ),
+                predict_measurement_payload=lambda measurement_id, *_args: self.objects[
+                    measurement_id
+                ],
             )
 
 

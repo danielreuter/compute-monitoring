@@ -25,25 +25,30 @@ class SimpleInferenceSimulatorTest(unittest.TestCase):
 
         self.assertEqual(
             [
-                (measurement.metadata.tick, measurement.metadata.stage)
+                (
+                    measurement.metadata.time,
+                    measurement.metadata.source,
+                    measurement.metadata.destination,
+                    measurement.metadata.stage,
+                )
                 for measurement in measurements
             ],
             [
-                (0, "ingress"),
-                (1, "prefill_request"),
-                (2, "ingress"),
-                (3, "prefill_state"),
-                (3, "prefill_request"),
-                (4, "ingress"),
-                (5, "completion"),
-                (5, "prefill_state"),
-                (5, "prefill_request"),
-                (6, "response"),
-                (7, "completion"),
-                (7, "prefill_state"),
-                (8, "response"),
-                (9, "completion"),
-                (10, "response"),
+                (0, "environment", "orchestrator", "ingress"),
+                (1, "orchestrator", "prefill", "prefill_request"),
+                (2, "environment", "orchestrator", "ingress"),
+                (3, "prefill", "decode", "prefill_state"),
+                (3, "orchestrator", "prefill", "prefill_request"),
+                (4, "environment", "orchestrator", "ingress"),
+                (5, "decode", "orchestrator", "completion"),
+                (5, "prefill", "decode", "prefill_state"),
+                (5, "orchestrator", "prefill", "prefill_request"),
+                (6, "orchestrator", "environment", "response"),
+                (7, "decode", "orchestrator", "completion"),
+                (7, "prefill", "decode", "prefill_state"),
+                (8, "orchestrator", "environment", "response"),
+                (9, "decode", "orchestrator", "completion"),
+                (10, "orchestrator", "environment", "response"),
             ],
         )
         self.assertEqual(
@@ -80,43 +85,59 @@ class SimpleInferenceSimulatorTest(unittest.TestCase):
         self.assertEqual(advice.metadata, "0,2,4|2:1,3:2,4:2")
 
         self.assertEqual(
-            [(metadata.stage, metadata.tick) for metadata in base_prediction],
             [
-                ("ingress", 0),
-                ("prefill_request", 1),
-                ("ingress", 1),
-                ("prefill_state", 2),
-                ("prefill_request", 2),
-                ("ingress", 2),
-                ("completion", 3),
-                ("prefill_state", 3),
-                ("prefill_request", 3),
-                ("response", 4),
-                ("completion", 4),
-                ("prefill_state", 4),
-                ("response", 5),
-                ("completion", 5),
-                ("response", 6),
+                (
+                    metadata.time,
+                    metadata.source,
+                    metadata.destination,
+                    metadata.stage,
+                )
+                for metadata in base_prediction
+            ],
+            [
+                (0, "environment", "orchestrator", "ingress"),
+                (1, "orchestrator", "prefill", "prefill_request"),
+                (1, "environment", "orchestrator", "ingress"),
+                (2, "prefill", "decode", "prefill_state"),
+                (2, "orchestrator", "prefill", "prefill_request"),
+                (2, "environment", "orchestrator", "ingress"),
+                (3, "decode", "orchestrator", "completion"),
+                (3, "prefill", "decode", "prefill_state"),
+                (3, "orchestrator", "prefill", "prefill_request"),
+                (4, "orchestrator", "environment", "response"),
+                (4, "decode", "orchestrator", "completion"),
+                (4, "prefill", "decode", "prefill_state"),
+                (5, "orchestrator", "environment", "response"),
+                (5, "decode", "orchestrator", "completion"),
+                (6, "orchestrator", "environment", "response"),
             ],
         )
         self.assertEqual(
-            [(metadata.stage, metadata.tick) for metadata in corrected_prediction],
             [
-                ("ingress", 0),
-                ("prefill_request", 1),
-                ("ingress", 2),
-                ("prefill_state", 3),
-                ("prefill_request", 3),
-                ("ingress", 4),
-                ("completion", 5),
-                ("prefill_state", 5),
-                ("prefill_request", 5),
-                ("response", 6),
-                ("completion", 7),
-                ("prefill_state", 7),
-                ("response", 8),
-                ("completion", 9),
-                ("response", 10),
+                (
+                    metadata.time,
+                    metadata.source,
+                    metadata.destination,
+                    metadata.stage,
+                )
+                for metadata in corrected_prediction
+            ],
+            [
+                (0, "environment", "orchestrator", "ingress"),
+                (1, "orchestrator", "prefill", "prefill_request"),
+                (2, "environment", "orchestrator", "ingress"),
+                (3, "prefill", "decode", "prefill_state"),
+                (3, "orchestrator", "prefill", "prefill_request"),
+                (4, "environment", "orchestrator", "ingress"),
+                (5, "decode", "orchestrator", "completion"),
+                (5, "prefill", "decode", "prefill_state"),
+                (5, "orchestrator", "prefill", "prefill_request"),
+                (6, "orchestrator", "environment", "response"),
+                (7, "decode", "orchestrator", "completion"),
+                (7, "prefill", "decode", "prefill_state"),
+                (8, "orchestrator", "environment", "response"),
+                (9, "decode", "orchestrator", "completion"),
+                (10, "orchestrator", "environment", "response"),
             ],
         )
 
@@ -148,6 +169,20 @@ class SimpleInferenceSimulatorTest(unittest.TestCase):
         self.assertIsInstance(metadata, TransferMetadata)
         tampered[1] = Measurement(
             metadata=replace(metadata, stage="completion"),
+            payload=tampered[1].payload,
+        )
+
+        with self.assertRaisesRegex(AssertionError, "INV-METADATA-CORRECTNESS"):
+            run_verification(setup, tuple(tampered), storage)
+
+    def test_rejects_tampered_destination_metadata(self) -> None:
+        setup = run_setup()
+        measurements, storage = run_execution(setup)
+        tampered = list(measurements)
+        metadata = tampered[1].metadata
+        self.assertIsInstance(metadata, TransferMetadata)
+        tampered[1] = Measurement(
+            metadata=replace(metadata, destination="decode"),
             payload=tampered[1].payload,
         )
 

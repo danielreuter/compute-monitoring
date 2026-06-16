@@ -59,11 +59,12 @@ Id = int
 Advice = str
 Object = Any
 T = TypeVar("T")
+TMetadata = TypeVar("TMetadata")
 
 
 @dataclass(frozen=True)
-class Measurement:
-    metadata: Any
+class Measurement(Generic[TMetadata]):
+    metadata: TMetadata
     payload: Hash
 
 
@@ -96,7 +97,14 @@ class Storage:
 
 @dataclass
 class Baseline:
-    """Prior commitment to predictor code, data, and models."""
+    """Prior commitment to predictor code, data, and models.
+
+    TODO: reintroduce predictor reads from baseline-committed objects. The
+    earlier task-based core opened committed input objects from storage and
+    passed them into predictors; this refactor currently keeps only commitment
+    checks. We still need to decide whether predictors should receive a
+    baseline reader, storage plus committed hashes, or pre-opened objects.
+    """
 
     committed_hashes: set[Hash]
 
@@ -112,16 +120,16 @@ class PredictionResult(Generic[T]):
 
 
 @dataclass
-class AuditResult:
+class AuditResult(Generic[TMetadata]):
     """Epoch-level metadata result plus sampled payload prediction results."""
 
-    metadata_prediction: PredictionResult[tuple[Any, ...]]
+    metadata_prediction: PredictionResult[tuple[TMetadata, ...]]
     sampled_measurement_ids: tuple[Id, ...]
     payload_predictions: tuple[PredictionResult[Object], ...]
 
 
-MeasurementMetadataPredictor = Callable[[Advice], tuple[Any, ...]]
-MeasurementPayloadPredictor = Callable[[Id, Any, Advice, Advice], Object]
+MeasurementMetadataPredictor = Callable[[Advice], tuple[TMetadata, ...]]
+MeasurementPayloadPredictor = Callable[[Id, TMetadata, Advice, Advice], Object]
 
 
 def execute(fn: Callable[[], T]) -> tuple[T, int]:
@@ -135,8 +143,8 @@ def predict_metadata(
     baseline: Baseline,
     params: PolicyParams,
     metadata_advice: Advice,
-    predictor: MeasurementMetadataPredictor,
-) -> PredictionResult[tuple[Any, ...]]:
+    predictor: MeasurementMetadataPredictor[TMetadata],
+) -> PredictionResult[tuple[TMetadata, ...]]:
     assert baseline.contains(params.metadata_predictor_hash), (
         "INV-PREDICTOR-COMMITMENT"
     )
@@ -155,10 +163,10 @@ def predict_payload(
     baseline: Baseline,
     params: PolicyParams,
     measurement_id: Id,
-    metadata: Any,
+    metadata: TMetadata,
     metadata_advice: Advice,
     payload_advice: Advice,
-    predictor: MeasurementPayloadPredictor,
+    predictor: MeasurementPayloadPredictor[TMetadata],
 ) -> PredictionResult[Object]:
     assert baseline.contains(params.payload_predictor_hash), (
         "INV-PREDICTOR-COMMITMENT"
@@ -194,16 +202,16 @@ def sample_measurement_ids(
 
 
 def audit_epoch(
-    measurements: Sequence[Measurement],
+    measurements: Sequence[Measurement[TMetadata]],
     storage: Storage,
     baseline: Baseline,
     params: PolicyParams,
     beacon: bytes,
     metadata_advice: Advice,
     payload_advice: tuple[Advice, ...],
-    predict_measurement_metadata: MeasurementMetadataPredictor,
-    predict_measurement_payload: MeasurementPayloadPredictor,
-) -> AuditResult:
+    predict_measurement_metadata: MeasurementMetadataPredictor[TMetadata],
+    predict_measurement_payload: MeasurementPayloadPredictor[TMetadata],
+) -> AuditResult[TMetadata]:
     measurements = tuple(measurements)
     assert 0 <= params.sample_rate_per_measurement <= 1, "INV-POLICY-PARAMS"
     assert len(payload_advice) == len(measurements), "INV-ADVICE-SHAPE"

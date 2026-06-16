@@ -1,9 +1,9 @@
 """Small deterministic inference simulator for the PoComp sketch.
 
 The topology is baked into this module: each stage determines route and
-payload provenance. Metadata prediction only predicts timing buckets and
-stages; payload prediction reconstructs sampled payloads from the baked-in
-stage topology and the public ingress prompts.
+payload provenance. Metadata prediction predicts the observed transfer headers;
+payload prediction reconstructs sampled payloads from the baked-in stage
+topology and the public ingress prompts.
 """
 
 from __future__ import annotations
@@ -51,7 +51,9 @@ class StageSpec:
 
 @dataclass(frozen=True)
 class TransferMetadata:
-    tick: int
+    time: int
+    source: str
+    destination: str
     stage: str
 
 
@@ -213,11 +215,11 @@ def sample_timing_jitter(timing_seed: int) -> dict[int, int]:
 def simulate_transcript(
     ingress_ticks: tuple[int, ...] | None = None,
     timing_corrections: dict[int, int] | None = None,
-) -> tuple[tuple[Measurement, ...], Storage, tuple[Object, ...]]:
+) -> tuple[tuple[Measurement[TransferMetadata], ...], Storage, tuple[Object, ...]]:
     ingress_ticks = ingress_ticks or base_ingress_ticks()
     timing_corrections = timing_corrections or {}
     assert len(ingress_ticks) == len(PUBLIC_PROMPTS)
-    scheduled: list[tuple[int, int, int, Measurement, Object]] = []
+    scheduled: list[tuple[int, int, int, Measurement[TransferMetadata], Object]] = []
 
     for ingress_ordinal, ingress_tick in enumerate(ingress_ticks):
         prompt = PUBLIC_PROMPTS[ingress_ordinal]
@@ -225,12 +227,14 @@ def simulate_transcript(
             payload_object = payload_for_stage(spec.stage, prompt)
             tick_delta = timing_corrections.get(stage_index, 0)
             metadata = TransferMetadata(
-                tick=ingress_tick + spec.tick_offset + tick_delta,
+                time=ingress_tick + spec.tick_offset + tick_delta,
+                source=spec.sender,
+                destination=spec.receiver,
                 stage=spec.stage,
             )
             scheduled.append(
                 (
-                    metadata.tick,
+                    metadata.time,
                     ingress_ordinal,
                     stage_index,
                     Measurement(metadata=metadata, payload=hash(payload_object)),
@@ -247,7 +251,9 @@ def simulate_transcript(
     return measurements, storage, objects
 
 
-def run_execution(setup: EpochSetup) -> tuple[tuple[Measurement, ...], Storage]:
+def run_execution(
+    setup: EpochSetup,
+) -> tuple[tuple[Measurement[TransferMetadata], ...], Storage]:
     measurements, storage, _objects = simulate_transcript(
         sample_ingress_ticks(setup.ingress_seed),
         sample_timing_jitter(setup.timing_seed),
@@ -335,7 +341,7 @@ def predict_measurement_payload(
 
 
 def infer_ingress_ticks(
-    measurements: tuple[Measurement, ...],
+    measurements: tuple[Measurement[TransferMetadata], ...],
 ) -> tuple[int, ...]:
     ingress_ticks: list[int] = []
 
@@ -343,13 +349,13 @@ def infer_ingress_ticks(
         metadata = measurement.metadata
         assert isinstance(metadata, TransferMetadata)
         if metadata.stage == "ingress":
-            ingress_ticks.append(metadata.tick)
+            ingress_ticks.append(metadata.time)
 
     return tuple(ingress_ticks)
 
 
 def infer_timing_corrections(
-    measurements: tuple[Measurement, ...],
+    measurements: tuple[Measurement[TransferMetadata], ...],
     ingress_ticks: tuple[int, ...],
 ) -> dict[int, int]:
     corrections: dict[int, int] = {}
@@ -365,7 +371,7 @@ def infer_timing_corrections(
         if spec.stage == "ingress" or stage_count >= len(ingress_ticks):
             continue
 
-        tick_delta = metadata.tick - (ingress_ticks[stage_count] + spec.tick_offset)
+        tick_delta = metadata.time - (ingress_ticks[stage_count] + spec.tick_offset)
         if tick_delta:
             corrections.setdefault(stage_index, tick_delta)
 
@@ -374,7 +380,7 @@ def infer_timing_corrections(
 
 def compute_advice(
     _setup: EpochSetup,
-    measurements: tuple[Measurement, ...],
+    measurements: tuple[Measurement[TransferMetadata], ...],
     _storage: Storage,
 ) -> PredictionAdvice:
     ingress_ticks = infer_ingress_ticks(measurements)
@@ -387,9 +393,9 @@ def compute_advice(
 
 def run_verification(
     setup: EpochSetup,
-    measurements: tuple[Measurement, ...],
+    measurements: tuple[Measurement[TransferMetadata], ...],
     storage: Storage,
-) -> AuditResult:
+) -> AuditResult[TransferMetadata]:
     advice = compute_advice(setup, measurements, storage)
     baseline = Baseline(
         set(storage.objects)
@@ -411,15 +417,18 @@ def run_verification(
     )
 
 
-def run_epoch() -> tuple[tuple[Measurement, ...], AuditResult]:
+def run_epoch() -> tuple[
+    tuple[Measurement[TransferMetadata], ...],
+    AuditResult[TransferMetadata],
+]:
     setup = run_setup()
     measurements, storage = run_execution(setup)
     return measurements, run_verification(setup, measurements, storage)
 
 
 def print_epoch(
-    measurements: tuple[Measurement, ...],
-    audit_result: AuditResult,
+    measurements: tuple[Measurement[TransferMetadata], ...],
+    audit_result: AuditResult[TransferMetadata],
 ) -> None:
     print("measurements=")
     for measurement in measurements:
@@ -427,7 +436,7 @@ def print_epoch(
         spec = STAGE_BY_NAME[metadata.stage]
         print(
             "  "
-            f"t={metadata.tick} {spec.sender}->{spec.receiver} "
+            f"t={metadata.time} {metadata.source}->{metadata.destination} "
             f"stage={metadata.stage} provenance={spec.provenance} "
             f"payload={measurement.payload}"
         )
